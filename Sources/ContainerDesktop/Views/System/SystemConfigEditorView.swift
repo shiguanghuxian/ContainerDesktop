@@ -1,0 +1,473 @@
+import SwiftUI
+
+struct SystemConfigEditorView: View {
+    @Environment(\.appLanguage) private var language
+    @AppStorage("containerdesktop.appearance") private var appearanceRaw = AppearancePreference.system.rawValue
+    @AppStorage("containerdesktop.language") private var languageRaw = AppLanguage.system.rawValue
+    @Bindable var systemConfigStore: SystemConfigStore
+
+    @State private var selectedCategory: ConfigCategory = .general
+    @State private var settingsSearch = ""
+
+    private var appearanceBinding: Binding<AppearancePreference> {
+        Binding(
+            get: { AppearancePreference(rawValue: appearanceRaw) ?? .system },
+            set: { appearanceRaw = $0.rawValue }
+        )
+    }
+
+    private var languageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { AppLanguage(rawValue: languageRaw) ?? .system },
+            set: { languageRaw = $0.rawValue }
+        )
+    }
+
+    private var machineCPUBinding: Binding<String> {
+        Binding(
+            get: { systemConfigStore.config.machine.cpus.map(String.init) ?? "" },
+            set: { systemConfigStore.config.machine.cpus = Int($0.trimmed) }
+        )
+    }
+
+    private var machineMemoryBinding: Binding<String> {
+        Binding(
+            get: { systemConfigStore.config.machine.memory ?? "" },
+            set: { systemConfigStore.config.machine.memory = $0.nilIfBlank }
+        )
+    }
+
+    private var machineHomeMountBinding: Binding<String> {
+        Binding(
+            get: { systemConfigStore.config.machine.homeMount ?? "" },
+            set: { systemConfigStore.config.machine.homeMount = $0.nilIfBlank }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            configToolbar
+
+            if let errorMessage = systemConfigStore.errorMessage {
+                StatusPill(title: errorMessage, systemImage: "exclamationmark.triangle", tint: .red)
+            } else if let saveMessage = systemConfigStore.saveMessage {
+                StatusPill(title: saveMessage, systemImage: "checkmark.circle", tint: CDTheme.lime)
+            }
+
+            HStack(alignment: .top, spacing: 0) {
+                settingsSidebar
+                    .frame(width: 260)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 18) {
+                    SettingsSectionHeader(
+                        title: selectedCategory.title(language: language),
+                        subtitle: selectedCategory.subtitle(language: language),
+                        systemImage: selectedCategory.systemImage
+                    )
+
+                    selectedCategoryContent
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(CDTheme.separator)
+            }
+
+            Text(language.t(.configSavedHint))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .task {
+            await systemConfigStore.load()
+        }
+    }
+
+    private var configToolbar: some View {
+        HStack(spacing: 12) {
+            IconTile(systemImage: "doc.badge.gearshape", tint: CDTheme.dockerBlue, size: 34)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("container config.toml")
+                    .font(.headline.weight(.semibold))
+                Text(systemConfigStore.configPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                systemConfigStore.resetToDefaults()
+            } label: {
+                Label(language.t(.defaults), systemImage: "arrow.counterclockwise")
+            }
+
+            Button {
+                Task { await systemConfigStore.reload() }
+            } label: {
+                Label(language.t(.reload), systemImage: "arrow.clockwise")
+            }
+
+            Button {
+                Task { await systemConfigStore.save() }
+            } label: {
+                Label(language.t(.save), systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(systemConfigStore.isSaving)
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.separator)
+        }
+    }
+
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(language.t(.search), text: $settingsSearch)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 38)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+            .padding([.horizontal, .top], 14)
+
+            VStack(spacing: 4) {
+                ForEach(filteredCategories) { category in
+                    Button {
+                        selectedCategory = category
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: category.systemImage)
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 20)
+                                .foregroundStyle(selectedCategory == category ? CDTheme.dockerBlue : .secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(category.title(language: language))
+                                    .font(.callout.weight(.semibold))
+                                Text(category.sidebarSubtitle(language: language))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(selectedCategory == category ? CDTheme.dockerBlue.opacity(0.11) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 14)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var filteredCategories: [ConfigCategory] {
+        let query = settingsSearch.trimmed.lowercased()
+        guard !query.isEmpty else { return ConfigCategory.allCases }
+        return ConfigCategory.allCases.filter {
+            $0.title(language: language).lowercased().contains(query)
+                || $0.sidebarSubtitle(language: language).lowercased().contains(query)
+        }
+    }
+
+    @ViewBuilder
+    private var selectedCategoryContent: some View {
+        switch selectedCategory {
+        case .general:
+            generalPane
+        case .resources:
+            resourcesPane
+        case .network:
+            networkPane
+        case .registry:
+            registryPane
+        case .kernel:
+            kernelPane
+        case .runtime:
+            runtimePane
+        }
+    }
+
+    private var generalPane: some View {
+        SettingsGroup(title: language.t(.appSettings), subtitle: "ContainerDesktop") {
+            SettingsFormRow(title: language.t(.language), subtitle: "UI language") {
+                Picker(language.t(.language), selection: languageBinding) {
+                    ForEach(AppLanguage.allCases) { item in
+                        Text(item.displayName).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 360)
+            }
+
+            SettingsFormRow(title: language.t(.theme), subtitle: "Window appearance") {
+                Picker(language.t(.theme), selection: appearanceBinding) {
+                    ForEach(AppearancePreference.allCases) { item in
+                        Text(item.title(language: language)).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 360)
+            }
+        }
+    }
+
+    private var resourcesPane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsGroup(title: language.t(.builder), subtitle: "[build]") {
+                SettingsFormRow(title: "Rosetta", subtitle: "Enable x86_64 translation for build workloads") {
+                    Toggle("", isOn: $systemConfigStore.config.build.rosetta)
+                        .labelsHidden()
+                }
+                SettingsFormRow(title: "CPUs", subtitle: "Builder VM CPU count") {
+                    Stepper("\(systemConfigStore.config.build.cpus)", value: $systemConfigStore.config.build.cpus, in: 1...64)
+                        .frame(width: 180, alignment: .trailing)
+                }
+                SettingsFormRow(title: "Memory", subtitle: "Builder VM memory limit") {
+                    TextField("2048mb", text: $systemConfigStore.config.build.memory)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 280)
+                }
+                SettingsFormRow(title: "Image", subtitle: "Builder image reference") {
+                    TextField("ghcr.io/apple/container-builder-shim/builder:latest", text: $systemConfigStore.config.build.image)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 420)
+                }
+            }
+
+            SettingsGroup(title: language.t(.containerDefaults), subtitle: "[container]") {
+                SettingsFormRow(title: "CPUs", subtitle: "Default CPU count for new containers") {
+                    Stepper("\(systemConfigStore.config.container.cpus)", value: $systemConfigStore.config.container.cpus, in: 1...64)
+                        .frame(width: 180, alignment: .trailing)
+                }
+                SettingsFormRow(title: "Memory", subtitle: "Default memory for new containers") {
+                    TextField("1g", text: $systemConfigStore.config.container.memory)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 280)
+                }
+            }
+
+            SettingsGroup(title: language.t(.machine), subtitle: "[machine]") {
+                SettingsFormRow(title: "CPUs", subtitle: "Leave blank for automatic sizing") {
+                    TextField("auto", text: machineCPUBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                SettingsFormRow(title: "Memory", subtitle: "Leave blank for automatic sizing") {
+                    TextField("auto", text: machineMemoryBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                SettingsFormRow(title: "Home mount", subtitle: "rw, ro, or none") {
+                    TextField("rw / ro / none", text: machineHomeMountBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+            }
+        }
+    }
+
+    private var networkPane: some View {
+        SettingsGroup(title: language.t(.networkSettings), subtitle: "[dns] / [network]") {
+            SettingsFormRow(title: "DNS domain", subtitle: "Default local domain") {
+                TextField("test", text: $systemConfigStore.config.dns.domain.orEmpty())
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 320)
+            }
+            SettingsFormRow(title: "IPv4 subnet", subtitle: "Default user network subnet") {
+                TextField("192.168.64.0/24", text: $systemConfigStore.config.network.subnet.orEmpty())
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 320)
+            }
+            SettingsFormRow(title: "IPv6 subnet", subtitle: "Optional IPv6 prefix") {
+                TextField("fd00::/64", text: $systemConfigStore.config.network.subnetv6.orEmpty())
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 320)
+            }
+        }
+    }
+
+    private var registryPane: some View {
+        SettingsGroup(title: language.t(.registries), subtitle: "[registry]") {
+            SettingsFormRow(title: "Domain", subtitle: "Default image registry domain") {
+                TextField("docker.io", text: $systemConfigStore.config.registry.domain)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 320)
+            }
+        }
+    }
+
+    private var kernelPane: some View {
+        SettingsGroup(title: language.t(.kernel), subtitle: "[kernel]") {
+            SettingsFormRow(title: "Binary path", subtitle: "Linux guest kernel path") {
+                TextField("opt/kata/share/kata-containers/vmlinux...", text: $systemConfigStore.config.kernel.binaryPath)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 460)
+            }
+            SettingsFormRow(title: "URL", subtitle: "Kernel archive source") {
+                TextField("https://...", text: $systemConfigStore.config.kernel.url)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 460)
+            }
+        }
+    }
+
+    private var runtimePane: some View {
+        SettingsGroup(title: language.t(.runtime), subtitle: "[vminit]") {
+            SettingsFormRow(title: "VM init image", subtitle: "vminitd image reference") {
+                TextField("ghcr.io/apple/containerization/vminit:latest", text: $systemConfigStore.config.vminit.image)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 460)
+            }
+        }
+    }
+}
+
+private enum ConfigCategory: String, CaseIterable, Identifiable {
+    case general
+    case resources
+    case network
+    case registry
+    case kernel
+    case runtime
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .general: "slider.horizontal.3"
+        case .resources: "cpu"
+        case .network: "network"
+        case .registry: "key.icloud"
+        case .kernel: "memorychip"
+        case .runtime: "terminal"
+        }
+    }
+
+    func title(language: AppLanguage) -> String {
+        switch self {
+        case .general: language.t(.general)
+        case .resources: language.t(.resources)
+        case .network: language.t(.networkSettings)
+        case .registry: language.t(.registries)
+        case .kernel: language.t(.kernel)
+        case .runtime: language.t(.runtime)
+        }
+    }
+
+    func subtitle(language: AppLanguage) -> String {
+        switch self {
+        case .general: language.resolved == .zhHans ? "语言、主题和应用体验。" : "Language, theme, and app experience."
+        case .resources: language.resolved == .zhHans ? "构建器、容器和虚拟机默认资源。" : "Builder, container, and machine resource defaults."
+        case .network: language.resolved == .zhHans ? "DNS 域和默认网络子网。" : "DNS domain and default network subnets."
+        case .registry: language.resolved == .zhHans ? "默认镜像仓库配置。" : "Default image registry configuration."
+        case .kernel: language.resolved == .zhHans ? "Linux guest 内核路径和下载源。" : "Linux guest kernel path and source URL."
+        case .runtime: language.resolved == .zhHans ? "VM init 镜像和运行时属性。" : "VM init image and runtime properties."
+        }
+    }
+
+    func sidebarSubtitle(language: AppLanguage) -> String {
+        switch self {
+        case .general: "ContainerDesktop"
+        case .resources: "[build] [container] [machine]"
+        case .network: "[dns] [network]"
+        case .registry: "[registry]"
+        case .kernel: "[kernel]"
+        case .runtime: "[vminit]"
+        }
+    }
+}
+
+private struct SettingsSectionHeader: View {
+    var title: String
+    var subtitle: String
+    var systemImage: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(systemImage: systemImage, tint: CDTheme.dockerBlue, size: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct SettingsGroup<Content: View>: View {
+    var title: String
+    var subtitle: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+
+            Divider()
+
+            VStack(spacing: 0) {
+                content
+            }
+        }
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.separator)
+        }
+    }
+}
+
+private struct SettingsFormRow<Control: View>: View {
+    var title: String
+    var subtitle: String
+    @ViewBuilder var control: Control
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 230, alignment: .leading)
+
+            Spacer(minLength: 12)
+
+            control
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+
+        Divider()
+            .padding(.leading, 14)
+    }
+}
