@@ -87,6 +87,31 @@ struct RegistryModelsTests {
         #expect(registryV2.isRegistryV2)
     }
 
+    @Test("builds tag list pull references")
+    func buildsTagListPullReferences() {
+        let latest = RegistryImageTag(name: "latest", size: nil, updatedAt: nil, digest: nil, mediaType: nil, platforms: [])
+        let version = RegistryImageTag(name: "1.0", size: nil, updatedAt: nil, digest: nil, mediaType: nil, platforms: [])
+        let dockerHub = RegistryTagListSelection(
+            source: .dockerHub,
+            title: "Docker Hub Tags",
+            displayName: "nginx",
+            repository: "nginx"
+        )
+        let registryV2 = RegistryTagListSelection(
+            source: .registryV2,
+            title: "Registry v2 Tags",
+            displayName: "team/app",
+            repository: "ghcr.io/team/app"
+        )
+
+        #expect(dockerHub.pullReference == "nginx")
+        #expect(dockerHub.reference(for: latest) == "nginx:latest")
+        #expect(!dockerHub.isRegistryV2)
+        #expect(registryV2.pullReference == "ghcr.io/team/app")
+        #expect(registryV2.reference(for: version) == "ghcr.io/team/app:1.0")
+        #expect(registryV2.isRegistryV2)
+    }
+
     @Test("tracks registry pagination state")
     func tracksRegistryPaginationState() {
         let page = RegistryPage(

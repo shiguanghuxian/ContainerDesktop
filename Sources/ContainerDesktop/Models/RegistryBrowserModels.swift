@@ -24,6 +24,29 @@ struct RegistryTagDetailSelection: Identifiable, Hashable, Sendable {
     }
 }
 
+struct RegistryTagListSelection: Identifiable, Hashable, Sendable {
+    var source: RegistryTagDetailSource
+    var title: String
+    var displayName: String
+    var repository: String
+
+    var id: String {
+        "\(source.rawValue):\(repository)"
+    }
+
+    var pullReference: String {
+        repository
+    }
+
+    var isRegistryV2: Bool {
+        source == .registryV2
+    }
+
+    func reference(for tag: RegistryImageTag) -> String {
+        "\(pullReference):\(tag.name)"
+    }
+}
+
 extension RegistrySummary {
     var isDockerHubRegistry: Bool {
         isDockerHub

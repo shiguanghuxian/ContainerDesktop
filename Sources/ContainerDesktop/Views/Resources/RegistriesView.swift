@@ -16,16 +16,11 @@ struct RegistriesView: View {
     @State private var customRegistryServer = "registry-1.docker.io"
     @State private var customRepository = "library/nginx"
     @State private var isRegistryV2Expanded = false
+    @State private var selectedTagList: RegistryTagListSelection?
     @State private var selectedTagDetail: RegistryTagDetailSelection?
 
     private let registryActionColumnWidth: CGFloat = 104
     private let browserDrawerWidth: CGFloat = 840
-    private let tagDetailDrawerWidth: CGFloat = 520
-    private let drawerSpacing: CGFloat = 12
-
-    private var activeDrawerWidth: CGFloat {
-        browserDrawerWidth + (selectedTagDetail == nil ? 0 : drawerSpacing + tagDetailDrawerWidth)
-    }
 
     private var filteredRegistries: [RegistrySummary] {
         let query = searchText.trimmed.lowercased()
@@ -48,7 +43,7 @@ struct RegistriesView: View {
         DrawerPageLayout(
             isDrawerPresented: showBrowserDrawer,
             onDismiss: closeBrowserDrawer,
-            drawerWidth: activeDrawerWidth
+            drawerWidth: browserDrawerWidth
         ) {
             pageContent
         } drawer: {
@@ -72,33 +67,25 @@ struct RegistriesView: View {
 
     @ViewBuilder
     private var registryBrowserDrawerStack: some View {
-        HStack(alignment: .top, spacing: drawerSpacing) {
-            RegistryBrowserDrawer(
-                store: browserStore,
-                query: $dockerHubQuery,
-                customRegistryServer: $customRegistryServer,
-                customRepository: $customRepository,
-                isRegistryV2Expanded: $isRegistryV2Expanded,
-                onClose: closeBrowserDrawer,
-                onPull: { reference in
-                    Task { await runtimeStore.pullImage(reference) }
-                },
-                onShowTagDetail: showTagDetail
-            )
-
-            if let selectedTagDetail {
-                RegistryTagDetailDrawer(
-                    selection: selectedTagDetail,
-                    isLoading: selectedTagDetail.isRegistryV2 && browserStore.isLoadingCustomTagDetails,
-                    onClose: closeTagDetail,
-                    onPull: { reference in
-                        Task { await runtimeStore.pullImage(reference) }
-                    }
-                )
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-        .frame(width: activeDrawerWidth, alignment: .trailing)
+        RegistryBrowserDrawer(
+            store: browserStore,
+            query: $dockerHubQuery,
+            customRegistryServer: $customRegistryServer,
+            customRepository: $customRepository,
+            isRegistryV2Expanded: $isRegistryV2Expanded,
+            selectedTagList: selectedTagList,
+            selectedTagDetail: selectedTagDetail,
+            onClose: closeBrowserDrawer,
+            onOpenDockerHubRepository: openDockerHubTagList,
+            onOpenRegistryV2Tags: openRegistryV2TagList,
+            onResetTagSelection: resetTagSelection,
+            onCloseTagList: closeTagList,
+            onCloseTagDetail: closeTagDetail,
+            onPull: { reference in
+                Task { await runtimeStore.pullImage(reference) }
+            },
+            onShowTagDetail: showTagDetail
+        )
     }
 
     private func openDockerHubBrowser() {
@@ -107,6 +94,7 @@ struct RegistriesView: View {
         }
         browserStore.searchQuery = dockerHubQuery.trimmed
         isRegistryV2Expanded = false
+        selectedTagList = nil
         selectedTagDetail = nil
         showBrowserDrawer = true
     }
@@ -121,6 +109,7 @@ struct RegistriesView: View {
         browserStore.customRegistryNextCursor = nil
         browserStore.customRegistryCursorStack = []
         isRegistryV2Expanded = true
+        selectedTagList = nil
         selectedTagDetail = nil
         showBrowserDrawer = true
     }
@@ -133,9 +122,54 @@ struct RegistriesView: View {
         }
     }
 
+    private func openDockerHubTagList(_ repository: RegistryRepositoryResult) {
+        let selection = RegistryTagListSelection(
+            source: .dockerHub,
+            title: language.resolved == .zhHans ? "Docker Hub 标签" : "Docker Hub Tags",
+            displayName: repository.displayName,
+            repository: repository.pullReference
+        )
+        showTagList(selection)
+    }
+
+    private func openRegistryV2TagList() {
+        let server = browserStore.customRegistryServer.trimmed
+        let repository = browserStore.customRepository.trimmed
+        guard !server.isEmpty, !repository.isEmpty else { return }
+        let reference = "\(server)/\(repository)"
+        let selection = RegistryTagListSelection(
+            source: .registryV2,
+            title: language.resolved == .zhHans ? "Registry v2 标签" : "Registry v2 Tags",
+            displayName: repository,
+            repository: reference
+        )
+        showTagList(selection)
+    }
+
+    private func showTagList(_ selection: RegistryTagListSelection) {
+        withAnimation(.snappy(duration: 0.2)) {
+            selectedTagList = selection
+            selectedTagDetail = nil
+        }
+    }
+
+    private func resetTagSelection() {
+        withAnimation(.snappy(duration: 0.2)) {
+            selectedTagList = nil
+            selectedTagDetail = nil
+        }
+    }
+
     private func showTagDetail(_ selection: RegistryTagDetailSelection) {
         withAnimation(.snappy(duration: 0.2)) {
             selectedTagDetail = selection
+        }
+    }
+
+    private func closeTagList() {
+        withAnimation(.snappy(duration: 0.2)) {
+            selectedTagList = nil
+            selectedTagDetail = nil
         }
     }
 
@@ -147,6 +181,7 @@ struct RegistriesView: View {
 
     private func closeBrowserDrawer() {
         showBrowserDrawer = false
+        selectedTagList = nil
         selectedTagDetail = nil
     }
 
@@ -338,11 +373,55 @@ private struct RegistryBrowserDrawer: View {
     @Binding var customRegistryServer: String
     @Binding var customRepository: String
     @Binding var isRegistryV2Expanded: Bool
+    var selectedTagList: RegistryTagListSelection?
+    var selectedTagDetail: RegistryTagDetailSelection?
     var onClose: () -> Void
+    var onOpenDockerHubRepository: (RegistryRepositoryResult) -> Void
+    var onOpenRegistryV2Tags: () -> Void
+    var onResetTagSelection: () -> Void
+    var onCloseTagList: () -> Void
+    var onCloseTagDetail: () -> Void
     var onPull: (String) -> Void
     var onShowTagDetail: (RegistryTagDetailSelection) -> Void
 
     var body: some View {
+        ZStack(alignment: .trailing) {
+            browserContent
+
+            if let selectedTagList {
+                RegistryTagListOverlay(
+                    store: store,
+                    selection: selectedTagList,
+                    onClose: onCloseTagList,
+                    onPull: onPull,
+                    onResetTagDetail: onCloseTagDetail,
+                    onShowTagDetail: onShowTagDetail
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .zIndex(1)
+            }
+
+            if let selectedTagDetail {
+                RegistryTagDetailOverlay(
+                    selection: selectedTagDetail,
+                    isLoading: selectedTagDetail.isRegistryV2 && store.isLoadingCustomTagDetails,
+                    onClose: onCloseTagDetail,
+                    onPull: onPull
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .zIndex(2)
+            }
+        }
+        .drawerSurface(width: 840)
+        .task {
+            if store.repositories.isEmpty {
+                store.searchQuery = query
+                await store.searchDockerHub()
+            }
+        }
+    }
+
+    private var browserContent: some View {
         VStack(spacing: 0) {
             DrawerHeader(
                 title: language.resolved == .zhHans ? "浏览镜像" : "Browse Images",
@@ -362,20 +441,15 @@ private struct RegistryBrowserDrawer: View {
                         customRegistryServer: $customRegistryServer,
                         customRepository: $customRepository,
                         isRegistryV2Expanded: $isRegistryV2Expanded,
-                        onPull: onPull,
-                        onShowTagDetail: onShowTagDetail
+                        onOpenDockerHubRepository: onOpenDockerHubRepository,
+                        onOpenRegistryV2Tags: onOpenRegistryV2Tags,
+                        onResetTagSelection: onResetTagSelection
                     )
                 }
                 .padding(16)
             }
         }
-        .drawerSurface(width: 840)
-        .task {
-            if store.repositories.isEmpty {
-                store.searchQuery = query
-                await store.searchDockerHub()
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -413,8 +487,9 @@ private struct RegistryBrowserPanel: View {
     @Binding var customRegistryServer: String
     @Binding var customRepository: String
     @Binding var isRegistryV2Expanded: Bool
-    var onPull: (String) -> Void
-    var onShowTagDetail: (RegistryTagDetailSelection) -> Void
+    var onOpenDockerHubRepository: (RegistryRepositoryResult) -> Void
+    var onOpenRegistryV2Tags: () -> Void
+    var onResetTagSelection: () -> Void
 
     var body: some View {
         PanelView(
@@ -427,6 +502,7 @@ private struct RegistryBrowserPanel: View {
                     TextField("nginx", text: $query)
                         .textFieldStyle(.roundedBorder)
                     Button {
+                        onResetTagSelection()
                         store.searchQuery = query
                         Task { await store.searchDockerHub(page: 1) }
                     } label: {
@@ -445,26 +521,14 @@ private struct RegistryBrowserPanel: View {
                     StatusBanner(text: errorMessage, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
                 }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 14) {
-                        repositoryList
-                            .frame(maxWidth: .infinity)
-                        tagList
-                            .frame(maxWidth: .infinity)
-                    }
-                    VStack(alignment: .leading, spacing: 14) {
-                        repositoryList
-                        tagList
-                    }
-                }
+                repositoryList
 
                 RegistryV2BrowserSection(
                     store: store,
                     isExpanded: $isRegistryV2Expanded,
                     customRegistryServer: $customRegistryServer,
                     customRepository: $customRepository,
-                    onPull: onPull,
-                    onShowTagDetail: onShowTagDetail
+                    onOpenTags: onOpenRegistryV2Tags
                 )
             }
         }
@@ -491,6 +555,13 @@ private struct RegistryBrowserPanel: View {
             } else {
                 ForEach(store.repositories.prefix(12)) { repository in
                     Button {
+                        store.selectedRepository = repository
+                        store.tags = []
+                        store.selectedTag = nil
+                        store.tagPage = 1
+                        store.tagTotalCount = nil
+                        store.tagHasNext = false
+                        onOpenDockerHubRepository(repository)
                         Task { await store.loadTags(for: repository) }
                     } label: {
                         HStack(spacing: 10) {
@@ -510,8 +581,14 @@ private struct RegistryBrowserPanel: View {
                             Text(repository.pullsDisplay)
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, 7)
+                        .padding(.horizontal, 6)
+                        .background(store.selectedRepository == repository ? CDTheme.selectionSurface : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -520,6 +597,7 @@ private struct RegistryBrowserPanel: View {
             }
             HStack {
                 Button(language.resolved == .zhHans ? "上一页" : "Previous") {
+                    onResetTagSelection()
                     Task { await store.loadPreviousRepositoryPage() }
                 }
                 .disabled(store.repositoryPage <= 1 || store.isSearching)
@@ -527,98 +605,10 @@ private struct RegistryBrowserPanel: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Button(language.resolved == .zhHans ? "下一页" : "Next") {
+                    onResetTagSelection()
                     Task { await store.loadNextRepositoryPage() }
                 }
                 .disabled(!store.repositoryHasNext || store.isSearching)
-                Spacer()
-            }
-        }
-        .padding(12)
-        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(CDTheme.separator)
-        }
-        .frame(minHeight: 420, alignment: .top)
-    }
-
-    private var tagList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(store.selectedRepository?.displayName ?? "Tags")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-                if let total = store.tagTotalCount {
-                    Text("\(total.formatted())")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if store.isLoadingTags {
-                ProgressView()
-                    .controlSize(.small)
-            } else if store.tags.isEmpty {
-                Text(language.resolved == .zhHans ? "选择仓库查看 tag。" : "Select a repository to inspect tags.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(store.tags.prefix(12)) { tag in
-                    HStack(spacing: 10) {
-                        Button {
-                            store.selectedTag = tag
-                            if let repository = store.selectedRepository {
-                                onShowTagDetail(RegistryTagDetailSelection(
-                                    source: .dockerHub,
-                                    title: language.resolved == .zhHans ? "Docker Hub Tag 详情" : "Docker Hub Tag Details",
-                                    repository: repository.pullReference,
-                                    tag: tag
-                                ))
-                            }
-                        } label: {
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(tag.name)
-                                        .font(.callout.weight(.semibold).monospaced())
-                                    Text("\(tag.sizeDisplay) · \(tag.updatedText) · \(tag.mediaTypeText) · \(tag.platformCountText) platforms")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if store.selectedTag == tag {
-                                    Image(systemName: "info.circle.fill")
-                                        .foregroundStyle(CDTheme.dockerBlue)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Button(language.t(.pull)) {
-                            if let repository = store.selectedRepository?.pullReference.nilIfBlank {
-                                onPull("\(repository):\(tag.name)")
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    .padding(.vertical, 7)
-                    Divider()
-                }
-            }
-            HStack {
-                Button(language.resolved == .zhHans ? "上一页" : "Previous") {
-                    Task { await store.loadPreviousTagPage() }
-                }
-                .disabled(store.tagPage <= 1 || store.isLoadingTags)
-                Text("\(store.tagPage)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Button(language.resolved == .zhHans ? "下一页" : "Next") {
-                    Task { await store.loadNextTagPage() }
-                }
-                .disabled(!store.tagHasNext || store.isLoadingTags)
                 Spacer()
             }
         }
@@ -638,12 +628,7 @@ private struct RegistryV2BrowserSection: View {
     @Binding var isExpanded: Bool
     @Binding var customRegistryServer: String
     @Binding var customRepository: String
-    var onPull: (String) -> Void
-    var onShowTagDetail: (RegistryTagDetailSelection) -> Void
-
-    private var repositoryReference: String {
-        "\(customRegistryServer.trimmed)/\(customRepository.trimmed)"
-    }
+    var onOpenTags: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -681,8 +666,6 @@ private struct RegistryV2BrowserSection: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     registryInputs
-                    customTagList
-                    paginationControls
                 }
                 .padding(12)
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -717,6 +700,11 @@ private struct RegistryV2BrowserSection: View {
                 Button {
                     store.customRegistryServer = customRegistryServer
                     store.customRepository = customRepository
+                    store.customRegistryTags = []
+                    store.selectedCustomRegistryTag = nil
+                    store.customRegistryNextCursor = nil
+                    store.customRegistryCursorStack = []
+                    onOpenTags()
                     Task { await store.loadCustomRegistryTags() }
                 } label: {
                     HStack(spacing: 7) {
@@ -732,71 +720,156 @@ private struct RegistryV2BrowserSection: View {
                     .frame(width: 94)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.isLoadingTags)
+                .disabled(store.isLoadingTags || customRegistryServer.trimmed.isEmpty || customRepository.trimmed.isEmpty)
             }
         }
     }
+}
 
-    private var customTagList: some View {
+private struct RegistryTagListOverlay: View {
+    @Environment(\.appLanguage) private var language
+    @Bindable var store: RegistryBrowserStore
+    var selection: RegistryTagListSelection
+    var onClose: () -> Void
+    var onPull: (String) -> Void
+    var onResetTagDetail: () -> Void
+    var onShowTagDetail: (RegistryTagDetailSelection) -> Void
+
+    private var tags: [RegistryImageTag] {
+        selection.isRegistryV2 ? store.customRegistryTags : store.tags
+    }
+
+    private var totalText: String? {
+        if selection.isRegistryV2 {
+            return tags.isEmpty ? nil : "\(tags.count.formatted())"
+        }
+        return store.tagTotalCount.map { "\($0.formatted())" }
+    }
+
+    private var isLoading: Bool {
+        store.isLoadingTags
+    }
+
+    var body: some View {
         VStack(spacing: 0) {
-            if store.customRegistryTags.isEmpty {
-                VStack(spacing: 8) {
-                    if store.isLoadingTags {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "tag")
-                            .foregroundStyle(.secondary)
+            DrawerHeader(
+                title: language.resolved == .zhHans ? "标签列表" : "Tags",
+                subtitle: selection.pullReference,
+                systemImage: "tag",
+                onClose: onClose
+            )
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    headerCard
+
+                    if let errorMessage = store.errorMessage {
+                        StatusBanner(text: errorMessage, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
                     }
-                    Text(store.isLoadingTags
-                        ? (language.resolved == .zhHans ? "正在读取 tags..." : "Loading tags...")
-                        : (language.resolved == .zhHans ? "输入仓库后查询 tags。" : "Enter a repository and search tags."))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+
+                    tagList
+                    paginationControls
                 }
-                .frame(maxWidth: .infinity, minHeight: 180)
+                .padding(16)
+            }
+        }
+        .drawerSurface(width: 620)
+    }
+
+    private var headerCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: selection.isRegistryV2 ? "network" : "shippingbox")
+                .foregroundStyle(CDTheme.dockerBlue)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(selection.title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Text(selection.displayName)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Text(selection.pullReference)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if isLoading {
+                StableLoadingIndicator(text: language.resolved == .zhHans ? "读取中" : "Loading")
+            } else if let totalText {
+                Text(totalText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.separator)
+        }
+    }
+
+    private var tagList: some View {
+        VStack(spacing: 0) {
+            if tags.isEmpty {
+                emptyTagState
             } else {
-                ForEach(store.customRegistryTags.prefix(18)) { tag in
-                    customTagRow(tag)
-                    if tag.id != store.customRegistryTags.prefix(18).last?.id {
+                let visibleTags = Array(tags.prefix(18))
+                ForEach(visibleTags) { tag in
+                    tagRow(tag)
+                    if tag.id != visibleTags.last?.id {
                         Divider()
                     }
                 }
             }
         }
-        .frame(minHeight: 220, alignment: .top)
-        .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+        .frame(minHeight: 420, alignment: .top)
+        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(CDTheme.hairline)
+                .strokeBorder(CDTheme.separator)
         }
     }
 
-    private func customTagRow(_ tag: RegistryImageTag) -> some View {
+    private var emptyTagState: some View {
+        VStack(spacing: 8) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "tag")
+                    .foregroundStyle(.secondary)
+            }
+            Text(isLoading
+                ? (language.resolved == .zhHans ? "正在读取 tags..." : "Loading tags...")
+                : (language.resolved == .zhHans ? "暂无 tags。" : "No tags."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 260)
+    }
+
+    private func tagRow(_ tag: RegistryImageTag) -> some View {
         HStack(spacing: 10) {
             Button {
-                store.selectedCustomRegistryTag = tag
-                onShowTagDetail(customTagDetailSelection(for: tag))
-                Task { @MainActor in
-                    await store.selectCustomRegistryTag(tag)
-                    if let selectedCustomRegistryTag = store.selectedCustomRegistryTag,
-                       selectedCustomRegistryTag.name == tag.name {
-                        onShowTagDetail(customTagDetailSelection(for: selectedCustomRegistryTag))
-                    }
-                }
+                selectTag(tag)
             } label: {
                 HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(tag.name)
-                            .font(.callout.monospaced())
+                            .font(.callout.weight(.semibold).monospaced())
                             .lineLimit(1)
-                        Text("\(tag.mediaTypeText) · \(tag.platformCountText) platforms")
+                        Text(tagMetadataText(for: tag))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                     Spacer()
-                    if store.selectedCustomRegistryTag == tag {
+                    if isSelected(tag) {
                         Image(systemName: "info.circle.fill")
                             .foregroundStyle(CDTheme.dockerBlue)
                     }
@@ -807,40 +880,107 @@ private struct RegistryV2BrowserSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(language.t(.pull)) {
-                onPull("\(repositoryReference):\(tag.name)")
+                onPull(selection.reference(for: tag))
             }
             .buttonStyle(.borderless)
         }
         .padding(.horizontal, 10)
-        .frame(height: 44)
-        .background(store.selectedCustomRegistryTag == tag ? CDTheme.selectionSurface : Color.clear)
-    }
-
-    private func customTagDetailSelection(for tag: RegistryImageTag) -> RegistryTagDetailSelection {
-        RegistryTagDetailSelection(
-            source: .registryV2,
-            title: language.resolved == .zhHans ? "Registry v2 Tag 详情" : "Registry v2 Tag Details",
-            repository: repositoryReference,
-            tag: tag
-        )
+        .frame(height: 54)
+        .background(isSelected(tag) ? CDTheme.selectionSurface : Color.clear)
     }
 
     private var paginationControls: some View {
         HStack {
             Button(language.resolved == .zhHans ? "上一页" : "Previous") {
-                Task { await store.loadPreviousCustomRegistryPage() }
+                onResetTagDetail()
+                Task {
+                    if selection.isRegistryV2 {
+                        await store.loadPreviousCustomRegistryPage()
+                    } else {
+                        await store.loadPreviousTagPage()
+                    }
+                }
             }
-            .disabled(store.customRegistryCursorStack.isEmpty || store.isLoadingTags)
+            .disabled(isPreviousDisabled)
+            Text(pageText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
             Button(language.resolved == .zhHans ? "下一页" : "Next") {
-                Task { await store.loadNextCustomRegistryPage() }
+                onResetTagDetail()
+                Task {
+                    if selection.isRegistryV2 {
+                        await store.loadNextCustomRegistryPage()
+                    } else {
+                        await store.loadNextTagPage()
+                    }
+                }
             }
-            .disabled(store.customRegistryNextCursor == nil || store.isLoadingTags)
+            .disabled(isNextDisabled)
             Spacer()
         }
     }
+
+    private var isPreviousDisabled: Bool {
+        if isLoading { return true }
+        if selection.isRegistryV2 {
+            return store.customRegistryCursorStack.isEmpty
+        }
+        return store.tagPage <= 1
+    }
+
+    private var isNextDisabled: Bool {
+        if isLoading { return true }
+        if selection.isRegistryV2 {
+            return store.customRegistryNextCursor == nil
+        }
+        return !store.tagHasNext
+    }
+
+    private var pageText: String {
+        selection.isRegistryV2 ? "\(store.customRegistryCursorStack.count + 1)" : "\(store.tagPage)"
+    }
+
+    private func selectTag(_ tag: RegistryImageTag) {
+        if selection.isRegistryV2 {
+            store.selectedCustomRegistryTag = tag
+            onShowTagDetail(tagDetailSelection(for: tag))
+            Task { @MainActor in
+                await store.selectCustomRegistryTag(tag)
+                if let selectedCustomRegistryTag = store.selectedCustomRegistryTag,
+                   selectedCustomRegistryTag.name == tag.name {
+                    onShowTagDetail(tagDetailSelection(for: selectedCustomRegistryTag))
+                }
+            }
+        } else {
+            store.selectedTag = tag
+            onShowTagDetail(tagDetailSelection(for: tag))
+        }
+    }
+
+    private func tagDetailSelection(for tag: RegistryImageTag) -> RegistryTagDetailSelection {
+        RegistryTagDetailSelection(
+            source: selection.source,
+            title: selection.isRegistryV2
+                ? (language.resolved == .zhHans ? "Registry v2 Tag 详情" : "Registry v2 Tag Details")
+                : (language.resolved == .zhHans ? "Docker Hub Tag 详情" : "Docker Hub Tag Details"),
+            repository: selection.pullReference,
+            tag: tag
+        )
+    }
+
+    private func isSelected(_ tag: RegistryImageTag) -> Bool {
+        if selection.isRegistryV2 {
+            return store.selectedCustomRegistryTag == tag
+        }
+        return store.selectedTag == tag
+    }
+
+    private func tagMetadataText(for tag: RegistryImageTag) -> String {
+        "\(tag.sizeDisplay) · \(tag.updatedText) · \(tag.mediaTypeText) · \(tag.platformCountText) platforms"
+    }
 }
 
-private struct RegistryTagDetailDrawer: View {
+private struct RegistryTagDetailOverlay: View {
     @Environment(\.appLanguage) private var language
     var selection: RegistryTagDetailSelection
     var isLoading: Bool
@@ -883,7 +1023,7 @@ private struct RegistryTagDetailDrawer: View {
                 .padding(16)
             }
         }
-        .drawerSurface(width: 520)
+        .drawerSurface(width: 620)
     }
 }
 
