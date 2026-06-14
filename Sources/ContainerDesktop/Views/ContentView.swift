@@ -7,6 +7,7 @@ struct ContentView: View {
     @Bindable var composeStore: ComposeProjectStore
     @Bindable var systemConfigStore: SystemConfigStore
     @Bindable var operationStore: AppOperationStore
+    @Bindable var appUpdateStore: AppUpdateStore
 
     @AppStorage("containerdesktop.selected.section") private var selectedSectionRaw = AppSection.dashboard.rawValue
     @AppStorage("containerdesktop.sidebar.collapsed") private var isSidebarCollapsed = false
@@ -142,7 +143,7 @@ struct ContentView: View {
                 }
             case .about:
                 PageScrollContainer {
-                    AboutView(runtimeStore: runtimeStore, composeStore: composeStore)
+                    AboutView(runtimeStore: runtimeStore, composeStore: composeStore, appUpdateStore: appUpdateStore)
                 }
             }
         }

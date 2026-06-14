@@ -11,6 +11,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let originalMainMenu = application.mainMenu
         var openedSections: [AppSection] = []
         var settingsOpenCount = 0
+        var updateCheckCount = 0
         var reloadCount = 0
 
         defer {
@@ -20,6 +21,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let actions = ContainerDesktopMainMenuActions(
             openMain: { section in openedSections.append(section) },
             openSettings: { settingsOpenCount += 1 },
+            checkForUpdates: { updateCheckCount += 1 },
             reload: { reloadCount += 1 }
         )
 
@@ -32,6 +34,7 @@ struct ContainerDesktopMainMenuControllerTests {
         #expect(application.mainMenu?.items.map(\.title) == ["ContainerDesktop", "编辑", "显示", "帮助"])
         #expect(application.mainMenu?.items[0].submenu?.items.first?.title == "关于 ContainerDesktop")
         #expect(application.mainMenu?.items[0].submenu?.items.first?.target === ContainerDesktopMainMenuController.shared)
+        #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "检查更新…" }?.target === ContainerDesktopMainMenuController.shared)
         #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "设置" }?.target === ContainerDesktopMainMenuController.shared)
 
         let chineseViewTitles = application.mainMenu?.items[2].submenu?.items
@@ -66,6 +69,12 @@ struct ContainerDesktopMainMenuControllerTests {
         }
         #expect(settingsOpenCount == 1)
 
+        if let updateItem = application.mainMenu?.items[0].submenu?.items.first(where: { $0.title == "检查更新…" }),
+           let action = updateItem.action {
+            NSApp.sendAction(action, to: updateItem.target, from: updateItem)
+        }
+        #expect(updateCheckCount == 1)
+
         if let reloadItem = application.mainMenu?.items[2].submenu?.items.first(where: { $0.title == "刷新" }),
            let action = reloadItem.action {
             NSApp.sendAction(action, to: reloadItem.target, from: reloadItem)
@@ -91,6 +100,7 @@ struct ContainerDesktopMainMenuControllerTests {
         }
         #expect(application.mainMenu?.items.map(\.title) == ["ContainerDesktop", "Edit", "View", "Help"])
         #expect(application.mainMenu?.items[0].submenu?.items.first?.title == "About ContainerDesktop")
+        #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "Check for Updates..." } != nil)
         #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "Settings" } != nil)
 
         let englishViewTitles = application.mainMenu?.items[2].submenu?.items
@@ -150,6 +160,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let actions = ContainerDesktopMainMenuActions(
             openMain: { _ in },
             openSettings: {},
+            checkForUpdates: {},
             reload: {}
         )
         ContainerDesktopMainMenuController.shared.configure(snapshot: snapshot, actions: actions)
@@ -190,6 +201,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let actions = ContainerDesktopMainMenuActions(
             openMain: { _ in },
             openSettings: {},
+            checkForUpdates: {},
             reload: {}
         )
         ContainerDesktopMainMenuController.shared.configure(snapshot: snapshot, actions: actions)

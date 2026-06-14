@@ -19,17 +19,24 @@ enum AppPaths {
         containerConfigURL.deletingLastPathComponent()
     }
 
-    static var composeProjectsURL: URL {
+    static var appConfigDirectory: URL {
         homeDirectory
             .appending(path: ".config")
             .appending(path: "containerdesktop")
+    }
+
+    static var composeProjectsURL: URL {
+        appConfigDirectory
             .appending(path: "compose-projects.json")
     }
 
     static var operationHistoryURL: URL {
-        homeDirectory
-            .appending(path: ".config")
-            .appending(path: "containerdesktop")
+        appConfigDirectory
             .appending(path: "operation-history.json")
+    }
+
+    static var appUpdateCacheDirectory: URL {
+        appConfigDirectory
+            .appending(path: "app-update-cache")
     }
 }

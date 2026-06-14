@@ -10,6 +10,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
 
     var appMenuTitle: String
     var aboutApp: String
+    var checkForUpdates: String
     var settings: String
     var hideApp: String
     var hideOthers: String
@@ -34,6 +35,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
         let isChinese = language.resolved == .zhHans
         appMenuTitle = "ContainerDesktop"
         aboutApp = isChinese ? "关于 ContainerDesktop" : "About ContainerDesktop"
+        checkForUpdates = isChinese ? "检查更新…" : "Check for Updates..."
         settings = language.t(.settings)
         hideApp = isChinese ? "隐藏 ContainerDesktop" : "Hide ContainerDesktop"
         hideOthers = isChinese ? "隐藏其他" : "Hide Others"
@@ -64,6 +66,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
     func hasSameVisibleContent(as other: ContainerDesktopMenuLocalizationSnapshot) -> Bool {
         self.appMenuTitle == other.appMenuTitle
             && self.aboutApp == other.aboutApp
+            && self.checkForUpdates == other.checkForUpdates
             && self.settings == other.settings
             && self.hideApp == other.hideApp
             && self.hideOthers == other.hideOthers
@@ -89,6 +92,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
 struct ContainerDesktopMainMenuActions {
     var openMain: @MainActor (AppSection) -> Void
     var openSettings: @MainActor () -> Void
+    var checkForUpdates: @MainActor () -> Void
     var reload: @MainActor () -> Void
 }
 
@@ -293,6 +297,7 @@ final class ContainerDesktopMainMenuController: NSObject, NSMenuDelegate, NSMenu
         menu.autoenablesItems = false
         menu.delegate = self
         menu.addItem(item(snapshot.aboutApp, action: #selector(openAbout(_:))))
+        menu.addItem(item(snapshot.checkForUpdates, action: #selector(checkForUpdates(_:))))
         menu.addItem(.separator())
         menu.addItem(item(snapshot.settings, action: #selector(openSettings(_:)), key: ","))
         menu.addItem(.separator())
@@ -428,6 +433,10 @@ final class ContainerDesktopMainMenuController: NSObject, NSMenuDelegate, NSMenu
 
     @objc private func openSettings(_ sender: NSMenuItem) {
         actions?.openSettings()
+    }
+
+    @objc private func checkForUpdates(_ sender: NSMenuItem) {
+        actions?.checkForUpdates()
     }
 
     @objc private func reload(_ sender: NSMenuItem) {

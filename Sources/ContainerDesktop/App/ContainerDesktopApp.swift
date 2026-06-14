@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let composeStore = ComposeProjectStore()
     private let systemConfigStore = SystemConfigStore()
     private let operationStore = AppOperationStore()
+    private let appUpdateStore = AppUpdateStore()
 
     private var mainWindow: NSWindow?
     private var mainHostingController: NSHostingController<AnyView>?
@@ -163,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             await composeStore.load()
             await composeStore.refreshVersion()
             await systemConfigStore.load()
+            await appUpdateStore.checkForUpdatesIfNeededOnLaunch()
             refreshStatusItem()
         }
     }
@@ -214,6 +216,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 },
                 openSettings: {
                     ContainerDesktopWindowRouter.openSettings()
+                },
+                checkForUpdates: {
+                    UserDefaults.standard.set(AppSection.about.rawValue, forKey: "containerdesktop.selected.section")
+                    ContainerDesktopMainWindow.activateOrOpen()
+                    Task {
+                        await self.appUpdateStore.checkForUpdates(isAutomatic: false)
+                    }
                 },
                 reload: {
                     Task {
@@ -268,7 +277,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 runtimeStore: runtimeStore,
                 composeStore: composeStore,
                 systemConfigStore: systemConfigStore,
-                operationStore: operationStore
+                operationStore: operationStore,
+                appUpdateStore: appUpdateStore
             )
             .environment(\.appLanguage, language)
             .preferredColorScheme(appearance.colorScheme)

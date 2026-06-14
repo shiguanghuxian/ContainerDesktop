@@ -5,6 +5,7 @@ struct AboutView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var composeStore: ComposeProjectStore
+    @Bindable var appUpdateStore: AppUpdateStore
     @State private var copiedMessage: String?
 
     private var appVersion: String {
@@ -57,6 +58,7 @@ struct AboutView: View {
             }
 
             heroPanel
+            softwareUpdatePanel
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 16) {
@@ -75,6 +77,96 @@ struct AboutView: View {
         .task {
             if runtimeStore.lastUpdated == nil {
                 await runtimeStore.refreshAll()
+            }
+        }
+    }
+
+    private var softwareUpdatePanel: some View {
+        PanelView(
+            title: localized("软件更新", "Software Update"),
+            subtitle: "appcast.json",
+            systemImage: "arrow.down.app"
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    StatusPill(
+                        title: updateStatusPillText,
+                        systemImage: updateStatusSystemImage,
+                        tint: updateStatusTint
+                    )
+                    Spacer()
+                    Toggle(localized("每天自动检查", "Check daily"), isOn: Binding(
+                        get: { appUpdateStore.automaticChecksEnabled },
+                        set: { appUpdateStore.automaticChecksEnabled = $0 }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+
+                Text(updateSummaryText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+                    SupportInfoMetric(title: localized("当前版本", "Current Version"), value: appUpdateStore.currentVersionText, systemImage: "app.badge")
+                    SupportInfoMetric(title: localized("最新版本", "Latest Version"), value: appUpdateStore.latestVersionText, systemImage: "number", tint: CDTheme.cyan)
+                    SupportInfoMetric(title: localized("更新源", "Update Feed"), value: "appcast.json", systemImage: "link", tint: CDTheme.violet)
+                }
+
+                if case .downloading(_, let progress) = appUpdateStore.status {
+                    if let progress {
+                        ProgressView(value: progress)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await appUpdateStore.runPrimaryAction() }
+                    } label: {
+                        if updateIsBusy {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(updatePrimaryActionTitle)
+                            }
+                        } else {
+                            Label(updatePrimaryActionTitle, systemImage: updatePrimaryActionSystemImage)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!appUpdateStore.canRunPrimaryAction)
+
+                    Button {
+                        appUpdateStore.openReleasePage()
+                    } label: {
+                        Label(localized("打开发布页", "Open Release Page"), systemImage: "safari")
+                    }
+                }
+
+                if let releaseNotes = appUpdateStore.releaseNotesPreview {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(localized("发布说明", "Release Notes"))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                        Text(releaseNotes)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(CDTheme.separator)
+                    }
+                }
             }
         }
     }
@@ -164,6 +256,130 @@ struct AboutView: View {
         networks: \(runtimeStore.networks.count)
         compose projects: \(composeStore.projects.count)
         """
+    }
+
+    private var updateSummaryText: String {
+        switch appUpdateStore.status {
+        case .idle:
+            return localized(
+                "从自定义 appcast 检查 ContainerDesktop 新版本。",
+                "Check the custom appcast feed for a newer ContainerDesktop release."
+            )
+        case .checking:
+            return localized("正在检查最新版本…", "Checking for updates...")
+        case .upToDate(let release):
+            return localized(
+                "当前已是最新版本。最新版本为 \(release.versionText)。",
+                "You are running the latest version. Latest version: \(release.versionText)."
+            )
+        case .updateAvailable(let package):
+            return localized(
+                "发现新版本 \(package.versionText)，下载包 \(package.asset.formattedSize)。",
+                "Version \(package.versionText) is available. Package size: \(package.asset.formattedSize)."
+            )
+        case .downloading(_, let progress):
+            if let progress {
+                return localized("正在下载更新 \(Int(progress * 100))%…", "Downloading update \(Int(progress * 100))%...")
+            }
+            return localized("正在下载更新…", "Downloading update...")
+        case .readyToInstall(let downloaded):
+            return localized(
+                "新版本 \(downloaded.package.versionText) 已下载，安装会退出并重新打开应用。",
+                "Version \(downloaded.package.versionText) is downloaded. Installing will quit and relaunch the app."
+            )
+        case .installing(let package):
+            return localized("正在准备安装 \(package.versionText)…", "Preparing to install \(package.versionText)...")
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var updatePrimaryActionTitle: String {
+        switch appUpdateStore.status {
+        case .checking:
+            return localized("检查中", "Checking")
+        case .updateAvailable:
+            return localized("下载并安装", "Download & Install")
+        case .downloading:
+            return localized("下载中", "Downloading")
+        case .readyToInstall:
+            return localized("安装并重启", "Install & Relaunch")
+        case .installing:
+            return localized("安装中", "Installing")
+        case .idle, .upToDate, .failed:
+            return localized("检查更新", "Check for Updates")
+        }
+    }
+
+    private var updatePrimaryActionSystemImage: String {
+        switch appUpdateStore.status {
+        case .readyToInstall:
+            return "arrow.clockwise.circle"
+        case .updateAvailable:
+            return "arrow.down.circle"
+        default:
+            return "arrow.clockwise"
+        }
+    }
+
+    private var updateStatusPillText: String {
+        switch appUpdateStore.status {
+        case .idle:
+            return localized("未检查", "Idle")
+        case .checking:
+            return localized("检查中", "Checking")
+        case .upToDate:
+            return localized("已是最新", "Current")
+        case .updateAvailable:
+            return localized("有新版本", "Update Available")
+        case .downloading:
+            return localized("下载中", "Downloading")
+        case .readyToInstall:
+            return localized("待安装", "Ready")
+        case .installing:
+            return localized("安装中", "Installing")
+        case .failed:
+            return localized("失败", "Failed")
+        }
+    }
+
+    private var updateStatusSystemImage: String {
+        switch appUpdateStore.status {
+        case .idle:
+            return "clock"
+        case .checking, .downloading, .installing:
+            return "hourglass"
+        case .upToDate:
+            return "checkmark.circle"
+        case .updateAvailable, .readyToInstall:
+            return "arrow.down.circle"
+        case .failed:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    private var updateStatusTint: Color {
+        switch appUpdateStore.status {
+        case .idle:
+            return .secondary
+        case .checking, .downloading, .installing:
+            return CDTheme.cyan
+        case .upToDate, .readyToInstall:
+            return CDTheme.lime
+        case .updateAvailable:
+            return CDTheme.dockerBlue
+        case .failed:
+            return CDTheme.ember
+        }
+    }
+
+    private var updateIsBusy: Bool {
+        switch appUpdateStore.status {
+        case .checking, .downloading, .installing:
+            return true
+        case .idle, .upToDate, .updateAvailable, .readyToInstall, .failed:
+            return false
+        }
     }
 
     private func copy(_ value: String, message: String) {
