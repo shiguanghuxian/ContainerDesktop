@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="ContainerDesktop is a native macOS desktop console for apple/container.">
+    <title>ContainerDesktop - Apple container desktop console</title>
+    <link rel="icon" href="assets/app-icon.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header" aria-label="Primary">
+      <a class="brand" href="#top" aria-label="ContainerDesktop home">
+        <img src="assets/app-icon.png" alt="" class="brand-icon">
+        <span>ContainerDesktop</span>
+      </a>
+      <nav class="nav-links" aria-label="Site navigation">
+        <a href="#features" data-i18n="nav.features">能力</a>
+        <a href="#install" data-i18n="nav.install">安装</a>
+        <a href="#requirements" data-i18n="nav.requirements">要求</a>
+        <a href="https://github.com/shiguanghuxian/ContainerDesktop" target="_blank" rel="noreferrer" data-i18n="nav.source">源码</a>
+      </nav>
+      <button class="language-toggle" type="button" aria-label="Switch language" data-lang-toggle>
+        <span data-lang-current>中文</span>
+      </button>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <img src="assets/containerdesktop-dashboard.png" alt="" class="hero-image">
+        <div class="hero-shade"></div>
+        <div class="scanline" aria-hidden="true"></div>
+        <div class="hero-content reveal">
+          <p class="eyebrow" data-i18n="hero.eyebrow">面向 apple/container 的原生控制台</p>
+          <h1 id="hero-title" data-i18n="hero.title">ContainerDesktop</h1>
+          <p class="hero-copy" data-i18n="hero.copy">
+            把容器、Machine、镜像、Compose、Registry、日志和系统配置收束到一个 macOS 桌面工作台里。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/shiguanghuxian/ContainerDesktop/releases/tag/0.1.0" target="_blank" rel="noreferrer" data-i18n="hero.download">下载 0.1.0</a>
+            <a class="button button-secondary" href="https://github.com/shiguanghuxian/ContainerDesktop" target="_blank" rel="noreferrer" data-i18n="hero.source">查看 GitHub 源码</a>
+          </div>
+          <div class="hero-metrics" aria-label="Highlights">
+            <span data-i18n="hero.metric1">macOS 26+</span>
+            <span data-i18n="hero.metric2">Apple silicon</span>
+            <span data-i18n="hero.metric3">SwiftUI 原生</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="mission section-pad reveal" aria-labelledby="mission-title">
+        <div>
+          <p class="section-kicker" data-i18n="mission.kicker">CLI-first, desktop-fast</p>
+          <h2 id="mission-title" data-i18n="mission.title">保留命令透明性，补齐桌面操作效率。</h2>
+        </div>
+        <p data-i18n="mission.copy">
+          ContainerDesktop 不隐藏底层命令。它把 apple/container 的 JSON 输出、长任务、交互式终端和配置文件编辑组织成可扫描、可重复执行的桌面工作流。
+        </p>
+      </section>
+
+      <section class="product-shot section-pad reveal" aria-labelledby="screenshot-title">
+        <div class="section-heading">
+          <p class="section-kicker" data-i18n="shot.kicker">真实运行截图</p>
+          <h2 id="screenshot-title" data-i18n="shot.title">一个窗口覆盖日常容器管理。</h2>
+        </div>
+        <figure class="screenshot-frame">
+          <img src="assets/containerdesktop-dashboard.png" alt="ContainerDesktop application window screenshot">
+          <figcaption data-i18n="shot.caption">Dashboard、侧栏资源导航、状态栏和资源管理页面来自当前真实运行的 ContainerDesktop。</figcaption>
+        </figure>
+      </section>
+
+      <section id="features" class="section-pad reveal" aria-labelledby="features-title">
+        <div class="section-heading">
+          <p class="section-kicker" data-i18n="features.kicker">控制面板</p>
+          <h2 id="features-title" data-i18n="features.title">为 apple/container 的完整工作流而设计。</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <span class="feature-code">01</span>
+            <h3 data-i18n="features.containers.title">容器详情</h3>
+            <p data-i18n="features.containers.copy">启动、停止、日志、Inspect JSON、Stats、Files 和 SwiftTerm Exec 终端集中在详情页。</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-code">02</span>
+            <h3 data-i18n="features.machines.title">Container Machine</h3>
+            <p data-i18n="features.machines.copy">创建和管理轻量 Linux Machine，支持原始 Inspect、日志和内置 Shell。</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-code">03</span>
+            <h3 data-i18n="features.compose.title">Compose 编排</h3>
+            <p data-i18n="features.compose.copy">添加 compose 文件，展开服务和容器，执行 build、up、down，并查看任务输出。</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-code">04</span>
+            <h3 data-i18n="features.registries.title">Registry 工作台</h3>
+            <p data-i18n="features.registries.copy">登录镜像仓库，浏览 Docker Hub 与 Registry v2 tags，查看 tag 元数据并直接 Pull。</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-code">05</span>
+            <h3 data-i18n="features.observability.title">观测与日志</h3>
+            <p data-i18n="features.observability.copy">聚合容器日志、boot 日志、系统日志和 stats 快照，适合排障和状态巡检。</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-code">06</span>
+            <h3 data-i18n="features.converter.title">Docker 命令转换</h3>
+            <p data-i18n="features.converter.copy">把常见 Docker 命令改写为 container / container-compose 命令，迁移时少猜参数。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="install" class="install section-pad reveal" aria-labelledby="install-title">
+        <div class="section-heading">
+          <p class="section-kicker" data-i18n="install.kicker">独立分发</p>
+          <h2 id="install-title" data-i18n="install.title">从 GitHub Releases 获取安装包。</h2>
+        </div>
+        <div class="install-flow">
+          <div class="install-step">
+            <span>1</span>
+            <p data-i18n="install.step1">打开 Release 0.1.0，下载最新的 zip 或 dmg 产物。</p>
+          </div>
+          <div class="install-step">
+            <span>2</span>
+            <p data-i18n="install.step2">解压并移动到 Applications，首次打开时按 macOS 安全提示确认。</p>
+          </div>
+          <div class="install-step">
+            <span>3</span>
+            <p data-i18n="install.step3">安装 apple/container；Compose 工作流再安装 container-compose。</p>
+          </div>
+        </div>
+        <div class="terminal-panel" aria-label="Install commands">
+          <div class="terminal-title">runtime checklist</div>
+          <pre><code>container system start
+container system status
+container-compose version</code></pre>
+        </div>
+      </section>
+
+      <section id="requirements" class="requirements section-pad reveal" aria-labelledby="requirements-title">
+        <div class="section-heading">
+          <p class="section-kicker" data-i18n="requirements.kicker">运行要求</p>
+          <h2 id="requirements-title" data-i18n="requirements.title">为现代 macOS 容器运行时准备。</h2>
+        </div>
+        <div class="requirements-list">
+          <div><strong>macOS</strong><span data-i18n="requirements.macos">26 或更新版本</span></div>
+          <div><strong>CPU</strong><span>Apple silicon / arm64</span></div>
+          <div><strong>Runtime</strong><span>apple/container CLI</span></div>
+          <div><strong>Compose</strong><span>container-compose CLI</span></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div>
+        <strong>ContainerDesktop</strong>
+        <span data-i18n="footer.copy">独立分发的 macOS 桌面控制台。</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/shiguanghuxian/ContainerDesktop/releases/tag/0.1.0" target="_blank" rel="noreferrer" data-i18n="footer.release">Release 0.1.0</a>
+        <a href="https://github.com/shiguanghuxian/ContainerDesktop" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
