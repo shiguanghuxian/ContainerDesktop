@@ -16,7 +16,7 @@ struct ResourceToolbar<Actions: View>: View {
             .padding(.horizontal, 12)
             .frame(height: 38)
             .frame(maxWidth: 360)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(CDTheme.separator)
@@ -38,12 +38,12 @@ struct ResourceTable<Header: View, Rows: View>: View {
             header
                 .padding(.horizontal, 14)
                 .frame(height: 44)
-                .background(.bar)
+                .background(CDTheme.tableHeaderSurface)
 
             Divider()
             rows
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(CDTheme.separator)
@@ -87,8 +87,8 @@ struct ResourceTableRow<Content: View>: View {
     }
 
     private var rowBackground: Color {
-        if isSelected { return CDTheme.dockerBlue.opacity(0.10) }
-        if isHovering { return Color.primary.opacity(0.035) }
+        if isSelected { return CDTheme.selectionSurface }
+        if isHovering { return CDTheme.hoverSurface }
         return .clear
     }
 }
@@ -108,25 +108,46 @@ struct ResourceStatusDot: View {
 struct RowActionButton: View {
     var systemImage: String
     var tint: Color = CDTheme.dockerBlue
+    var isLoading = false
+    var isDisabled = false
+    var help: String?
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isDisabled ? .secondary : tint)
+                        .frame(width: 28, height: 28)
+                }
+            }
+            .background((isDisabled ? Color.secondary : tint).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled || isLoading)
+        .help(help ?? "")
     }
 }
 
 struct DestructiveRowActionButton: View {
     var systemImage: String = "trash"
+    var isLoading = false
+    var isDisabled = false
     var action: () -> Void
 
     var body: some View {
-        RowActionButton(systemImage: systemImage, tint: .red, action: action)
+        RowActionButton(
+            systemImage: systemImage,
+            tint: .red,
+            isLoading: isLoading,
+            isDisabled: isDisabled,
+            action: action
+        )
     }
 }

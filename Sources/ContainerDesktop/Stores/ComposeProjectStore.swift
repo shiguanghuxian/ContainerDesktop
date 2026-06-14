@@ -12,6 +12,7 @@ final class ComposeProjectStore {
     var busyProjectID: ComposeProject.ID?
     var errorMessage: String?
     var lastOutput = "尚未运行 Compose 命令。"
+    var composeVersion = "—"
     var hasLoaded = false
 
     init(
@@ -51,6 +52,16 @@ final class ComposeProjectStore {
         persist()
     }
 
+    func refreshVersion() async {
+        do {
+            let output = try await client.version()
+            let combined = output.combinedOutput
+            composeVersion = combined.nilIfBlank ?? "—"
+        } catch {
+            composeVersion = error.localizedDescription
+        }
+    }
+
     func addProject(fileURL: URL) async {
         do {
             let project = try ComposeParser.parse(fileURL: fileURL)
@@ -68,20 +79,53 @@ final class ComposeProjectStore {
     }
 
     func build(_ project: ComposeProject, services: [String] = [], noCache: Bool = false) async {
+        var options = ComposeOperationOptions(services: services)
+        options.noCache = noCache
+        await build(project, options: options)
+    }
+
+    func build(_ project: ComposeProject, options: ComposeOperationOptions) async {
         await perform(project: project, label: "Build") {
-            try await client.build(composePath: project.path, services: services, noCache: noCache)
+            try await client.build(composePath: project.path, options: options)
         }
     }
 
-    func up(_ project: ComposeProject, services: [String] = []) async {
+    func up(_ project: ComposeProject, services: [String] = [], noCache: Bool = false) async {
+        var options = ComposeOperationOptions(services: services)
+        options.noCache = noCache
+        await up(project, options: options)
+    }
+
+    func up(_ project: ComposeProject, options: ComposeOperationOptions) async {
         await perform(project: project, label: "Up") {
-            try await client.up(composePath: project.path, services: services)
+            try await client.up(composePath: project.path, options: options)
         }
     }
 
     func down(_ project: ComposeProject, services: [String] = []) async {
+        await down(project, options: ComposeOperationOptions(services: services))
+    }
+
+    func down(_ project: ComposeProject, options: ComposeOperationOptions) async {
         await perform(project: project, label: "Down") {
-            try await client.down(composePath: project.path, services: services)
+            try await client.down(composePath: project.path, options: options)
+        }
+    }
+
+    func rebuild(_ project: ComposeProject, services: [String] = []) async {
+        let options = ComposeOperationOptions(services: services, buildBeforeUp: true, noCache: true)
+        await rebuild(project, options: options)
+    }
+
+    func rebuild(_ project: ComposeProject, options: ComposeOperationOptions) async {
+        var buildOptions = options
+        buildOptions.noCache = true
+        var upOptions = options
+        upOptions.buildBeforeUp = true
+        upOptions.noCache = true
+        await perform(project: project, label: "Rebuild") {
+            _ = try await client.build(composePath: project.path, options: buildOptions)
+            return try await client.up(composePath: project.path, options: upOptions)
         }
     }
 

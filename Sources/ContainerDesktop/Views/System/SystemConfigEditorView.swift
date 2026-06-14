@@ -23,21 +23,30 @@ struct SystemConfigEditorView: View {
         )
     }
 
-    private var machineCPUBinding: Binding<String> {
+    private var machineUsesAutoCPUsBinding: Binding<Bool> {
         Binding(
-            get: { systemConfigStore.config.machine.cpus.map(String.init) ?? "" },
-            set: { systemConfigStore.config.machine.cpus = Int($0.trimmed) }
+            get: { systemConfigStore.config.machine.cpus == nil },
+            set: { useAuto in
+                systemConfigStore.config.machine.cpus = useAuto ? nil : (systemConfigStore.config.machine.cpus ?? 4)
+            }
         )
     }
 
-    private var machineMemoryBinding: Binding<String> {
+    private var machineCPUValueBinding: Binding<Int> {
+        Binding(
+            get: { systemConfigStore.config.machine.cpus ?? 4 },
+            set: { systemConfigStore.config.machine.cpus = $0 }
+        )
+    }
+
+    private var machineMemorySelectionBinding: Binding<String> {
         Binding(
             get: { systemConfigStore.config.machine.memory ?? "" },
             set: { systemConfigStore.config.machine.memory = $0.nilIfBlank }
         )
     }
 
-    private var machineHomeMountBinding: Binding<String> {
+    private var machineHomeMountSelectionBinding: Binding<String> {
         Binding(
             get: { systemConfigStore.config.machine.homeMount ?? "" },
             set: { systemConfigStore.config.machine.homeMount = $0.nilIfBlank }
@@ -72,7 +81,7 @@ struct SystemConfigEditorView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(CDTheme.separator)
@@ -106,12 +115,14 @@ struct SystemConfigEditorView: View {
             } label: {
                 Label(language.t(.defaults), systemImage: "arrow.counterclockwise")
             }
+            .buttonStyle(CDSecondaryButtonStyle())
 
             Button {
                 Task { await systemConfigStore.reload() }
             } label: {
                 Label(language.t(.reload), systemImage: "arrow.clockwise")
             }
+            .buttonStyle(CDSecondaryButtonStyle())
 
             Button {
                 Task { await systemConfigStore.save() }
@@ -122,7 +133,7 @@ struct SystemConfigEditorView: View {
             .disabled(systemConfigStore.isSaving)
         }
         .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(CDTheme.separator)
@@ -139,7 +150,11 @@ struct SystemConfigEditorView: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 38)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+            .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(CDTheme.hairline)
+            }
             .padding([.horizontal, .top], 14)
 
             VStack(spacing: 4) {
@@ -163,7 +178,9 @@ struct SystemConfigEditorView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 9)
-                        .background(selectedCategory == category ? CDTheme.dockerBlue.opacity(0.11) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                        .background(selectedCategory == category ? CDTheme.selectionSurface : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                 }
@@ -205,24 +222,20 @@ struct SystemConfigEditorView: View {
     private var generalPane: some View {
         SettingsGroup(title: language.t(.appSettings), subtitle: "ContainerDesktop") {
             SettingsFormRow(title: language.t(.language), subtitle: "UI language") {
-                Picker(language.t(.language), selection: languageBinding) {
-                    ForEach(AppLanguage.allCases) { item in
-                        Text(item.displayName).tag(item)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
+                ThemedSegmentedPicker(
+                    options: AppLanguage.allCases,
+                    selection: languageBinding,
+                    title: { $0.displayName }
+                )
                 .frame(width: 360)
             }
 
             SettingsFormRow(title: language.t(.theme), subtitle: "Window appearance") {
-                Picker(language.t(.theme), selection: appearanceBinding) {
-                    ForEach(AppearancePreference.allCases) { item in
-                        Text(item.title(language: language)).tag(item)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
+                ThemedSegmentedPicker(
+                    options: AppearancePreference.allCases,
+                    selection: appearanceBinding,
+                    title: { $0.title(language: language) }
+                )
                 .frame(width: 360)
             }
         }
@@ -240,14 +253,22 @@ struct SystemConfigEditorView: View {
                         .frame(width: 180, alignment: .trailing)
                 }
                 SettingsFormRow(title: "Memory", subtitle: "Builder VM memory limit") {
-                    TextField("2048mb", text: $systemConfigStore.config.build.memory)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 280)
+                    Picker("Memory", selection: $systemConfigStore.config.build.memory) {
+                        ForEach(FormPresetOptions.choices(current: systemConfigStore.config.build.memory, suggestions: FormPresetOptions.memorySizes), id: \.self) { size in
+                            Text(size).tag(size)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
                 }
                 SettingsFormRow(title: "Image", subtitle: "Builder image reference") {
-                    TextField("ghcr.io/apple/container-builder-shim/builder:latest", text: $systemConfigStore.config.build.image)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 420)
+                    Picker("Image", selection: $systemConfigStore.config.build.image) {
+                        ForEach(FormPresetOptions.choices(current: systemConfigStore.config.build.image, suggestions: FormPresetOptions.builderImages), id: \.self) { image in
+                            Text(image).tag(image)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 420)
                 }
             }
 
@@ -257,27 +278,43 @@ struct SystemConfigEditorView: View {
                         .frame(width: 180, alignment: .trailing)
                 }
                 SettingsFormRow(title: "Memory", subtitle: "Default memory for new containers") {
-                    TextField("1g", text: $systemConfigStore.config.container.memory)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 280)
+                    Picker("Memory", selection: $systemConfigStore.config.container.memory) {
+                        ForEach(FormPresetOptions.choices(current: systemConfigStore.config.container.memory, suggestions: FormPresetOptions.memorySizes), id: \.self) { size in
+                            Text(size).tag(size)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
                 }
             }
 
             SettingsGroup(title: language.t(.machine), subtitle: "[machine]") {
                 SettingsFormRow(title: "CPUs", subtitle: "Leave blank for automatic sizing") {
-                    TextField("auto", text: machineCPUBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
+                    HStack(spacing: 12) {
+                        Toggle(language.resolved == .zhHans ? "自动" : "Auto", isOn: machineUsesAutoCPUsBinding)
+                            .toggleStyle(.switch)
+                        Stepper("\(machineCPUValueBinding.wrappedValue)", value: machineCPUValueBinding, in: 1...64)
+                            .disabled(machineUsesAutoCPUsBinding.wrappedValue)
+                            .frame(width: 120, alignment: .trailing)
+                    }
                 }
                 SettingsFormRow(title: "Memory", subtitle: "Leave blank for automatic sizing") {
-                    TextField("auto", text: machineMemoryBinding)
-                        .textFieldStyle(.roundedBorder)
+                    Picker("Memory", selection: machineMemorySelectionBinding) {
+                        Text(language.resolved == .zhHans ? "自动" : "Auto").tag("")
+                        ForEach(FormPresetOptions.choices(current: systemConfigStore.config.machine.memory ?? "", suggestions: FormPresetOptions.machineMemorySizes), id: \.self) { size in
+                            Text(size).tag(size)
+                        }
+                    }
+                    .labelsHidden()
                         .frame(width: 180)
                 }
                 SettingsFormRow(title: "Home mount", subtitle: "rw, ro, or none") {
-                    TextField("rw / ro / none", text: machineHomeMountBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
+                    ThemedSegmentedPicker(
+                        options: ["", "rw", "ro", "none"],
+                        selection: machineHomeMountSelectionBinding,
+                        title: { $0.isEmpty ? (language.resolved == .zhHans ? "默认" : "Default") : $0 }
+                    )
+                    .frame(width: 240)
                 }
             }
         }
@@ -306,9 +343,13 @@ struct SystemConfigEditorView: View {
     private var registryPane: some View {
         SettingsGroup(title: language.t(.registries), subtitle: "[registry]") {
             SettingsFormRow(title: "Domain", subtitle: "Default image registry domain") {
-                TextField("docker.io", text: $systemConfigStore.config.registry.domain)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 320)
+                Picker("Domain", selection: $systemConfigStore.config.registry.domain) {
+                    ForEach(FormPresetOptions.choices(current: systemConfigStore.config.registry.domain, suggestions: FormPresetOptions.registries), id: \.self) { domain in
+                        Text(domain).tag(domain)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 320)
             }
         }
     }
@@ -331,9 +372,13 @@ struct SystemConfigEditorView: View {
     private var runtimePane: some View {
         SettingsGroup(title: language.t(.runtime), subtitle: "[vminit]") {
             SettingsFormRow(title: "VM init image", subtitle: "vminitd image reference") {
-                TextField("ghcr.io/apple/containerization/vminit:latest", text: $systemConfigStore.config.vminit.image)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 460)
+                Picker("VM init image", selection: $systemConfigStore.config.vminit.image) {
+                    ForEach(FormPresetOptions.choices(current: systemConfigStore.config.vminit.image, suggestions: FormPresetOptions.vminitImages), id: \.self) { image in
+                        Text(image).tag(image)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 460)
             }
         }
     }
@@ -436,7 +481,7 @@ private struct SettingsGroup<Content: View>: View {
                 content
             }
         }
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(CDTheme.separator)

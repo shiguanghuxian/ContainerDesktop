@@ -60,6 +60,7 @@ struct SidebarView: View {
                 }
             }
             .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(sidebarCardBackground, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
@@ -70,7 +71,7 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     SidebarGroup(title: language.t(.localResources).uppercased()) {
-                        ForEach([AppSection.dashboard, .containers, .images, .volumes, .networks], id: \.self) { section in
+                        ForEach([AppSection.dashboard, .containers, .machines, .images, .volumes, .networks], id: \.self) { section in
                             SidebarNavButton(section: section, language: language, isSelected: selection == section) {
                                 selection = section
                             }
@@ -78,7 +79,7 @@ struct SidebarView: View {
                     }
 
                     SidebarGroup(title: language.t(.workflows).uppercased()) {
-                        ForEach([AppSection.compose, .registries], id: \.self) { section in
+                        ForEach([AppSection.compose, .observability, .registries, .commandConverter], id: \.self) { section in
                             SidebarNavButton(section: section, language: language, isSelected: selection == section) {
                                 selection = section
                             }
@@ -90,36 +91,23 @@ struct SidebarView: View {
                             selection = .system
                         }
                     }
+
+                    SidebarGroup(title: (language.resolved == .zhHans ? "支持" : "Support").uppercased()) {
+                        ForEach([AppSection.help, .about], id: \.self) { section in
+                            SidebarNavButton(section: section, language: language, isSelected: selection == section) {
+                                selection = section
+                            }
+                        }
+                    }
                 }
                 .padding(.vertical, 2)
             }
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(language.t(.compose).uppercased())
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.2)
-                    .foregroundStyle(CDTheme.cyan)
-                if composeStore.projects.isEmpty {
-                    Text(language.t(.noComposeProjects))
-                        .font(.callout)
-                        .foregroundStyle(secondaryText)
-                } else {
-                    ForEach(composeStore.projects.prefix(3)) { project in
-                        HStack(spacing: 8) {
-                            Image(systemName: "square.stack.3d.up")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 16)
-                            Text(project.name)
-                                .lineLimit(1)
-                                .font(.callout)
-                                .foregroundStyle(primaryText)
-                        }
-                    }
-                }
-            }
+            authorInfoCard
             .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(sidebarCardBackground, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
@@ -128,6 +116,49 @@ struct SidebarView: View {
         }
         .padding(12)
         .frame(width: 260)
+    }
+
+    private var authorInfoCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(language.resolved == .zhHans ? "作者信息" : "Author")
+                .font(.caption2.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(CDTheme.cyan)
+
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text("时光弧线")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(primaryText)
+                    .lineLimit(1)
+            }
+
+            Link(destination: URL(string: "mailto:zuoxiupeng@live.com")!) {
+                authorLinkLabel(text: "zuoxiupeng@live.com", systemImage: "envelope")
+            }
+            .buttonStyle(.plain)
+
+            Link(destination: URL(string: "https://github.com/shiguanghuxian")!) {
+                authorLinkLabel(text: "github.com/shiguanghuxian", systemImage: "link")
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func authorLinkLabel(text: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .contentShape(Rectangle())
     }
 
     private var collapsedSidebar: some View {
@@ -147,19 +178,29 @@ struct SidebarView: View {
                 .overlay(CDTheme.separator)
                 .padding(.vertical, 4)
 
-            ForEach(AppSection.allCases) { section in
-                Button {
-                    selection = section
-                } label: {
-                    Image(systemName: section.symbolName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(selection == section ? .white : secondaryText)
-                        .frame(width: 40, height: 38)
-                        .background(selection == section ? CDTheme.dockerBlue : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            ScrollView(.vertical) {
+                VStack(spacing: 8) {
+                    ForEach(AppSection.allCases) { section in
+                        Button {
+                            selection = section
+                        } label: {
+                            Image(systemName: section.symbolName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(selection == section ? .white : secondaryText)
+                                .frame(width: 40, height: 38)
+                                .background(selection == section ? CDTheme.dockerBlue : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(maxWidth: .infinity)
+                                .contentShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                        .buttonStyle(.plain)
+                        .help(section.title(language: language))
+                    }
                 }
-                .buttonStyle(.plain)
-                .help(section.title(language: language))
+                .frame(maxWidth: .infinity)
             }
+            .scrollIndicators(.never)
 
             Spacer()
         }
@@ -168,11 +209,11 @@ struct SidebarView: View {
     }
 
     private var sidebarBackground: Color {
-        colorScheme == .dark ? CDTheme.sidebar : Color(nsColor: .controlBackgroundColor)
+        colorScheme == .dark ? CDTheme.sidebar : CDTheme.appBackground
     }
 
     private var sidebarCardBackground: Color {
-        colorScheme == .dark ? CDTheme.sidebarElevated : Color(nsColor: .windowBackgroundColor)
+        colorScheme == .dark ? CDTheme.sidebarElevated : CDTheme.panelSurface
     }
 
     private var primaryText: Color {

@@ -1,0 +1,10 @@
+name: cdmanualcompose
+services:
+  app:
+    build: .
+    image: localhost/containerdesktop/cd-manual-compose:latest
+    command:
+      - sh
+      - -c
+      - echo cd-manual-compose-log-ok; cat /service-message.txt; sleep 3600
+

@@ -25,6 +25,13 @@ struct CommandResult: Sendable, Hashable {
     var stdout: String
     var stderr: String
     var exitCode: Int32
+
+    var combinedOutput: String {
+        [stdout, stderr]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
 }
 
 private final class ProcessBuffer: @unchecked Sendable {

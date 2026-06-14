@@ -1,0 +1,2 @@
+cd-manual-image-build-ok
+

@@ -29,35 +29,18 @@ struct DetailDrawer<Overview: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                IconTile(systemImage: systemImage, tint: CDTheme.dockerBlue, size: 34)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.headline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .help(language.resolved == .zhHans ? "关闭详情" : "Close details")
-            }
-            .padding(16)
+            DrawerHeader(
+                title: title,
+                subtitle: subtitle,
+                systemImage: systemImage,
+                onClose: onClose
+            )
 
-            Picker("", selection: $mode) {
-                ForEach(DetailDrawerMode.allCases) { item in
-                    Text(item == .raw ? rawLabel : item.title(language: language)).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ThemedSegmentedPicker(
+                options: DetailDrawerMode.allCases,
+                selection: $mode,
+                title: { $0 == .raw ? rawLabel : $0.title(language: language) }
+            )
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
 
@@ -75,37 +58,133 @@ struct DetailDrawer<Overview: View>: View {
                 .padding(16)
             }
         }
-        .frame(width: 430)
-        .frame(maxHeight: .infinity)
-        .background(.regularMaterial)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(CDTheme.dockerBlue.opacity(0.55))
-                .frame(width: 1)
+        .drawerSurface(width: 430)
+    }
+}
+
+struct DrawerHeader: View {
+    @Environment(\.appLanguage) private var language
+    var title: String
+    var subtitle: String
+    var systemImage: String
+    var onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(systemImage: systemImage, tint: CDTheme.dockerBlue, size: 34)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 10)
+            DrawerCloseButton(action: onClose)
         }
-        .shadow(color: Color.black.opacity(0.16), radius: 22, x: -8, y: 0)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(CDTheme.panelSurface)
+    }
+}
+
+private struct DrawerCloseButton: View {
+    @Environment(\.appLanguage) private var language
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(language.resolved == .zhHans ? "关闭" : "Close", systemImage: "xmark")
+                .font(.caption.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(CDTheme.separator)
+                }
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "关闭详情（Esc）" : "Close details (Esc)")
+        .keyboardShortcut(.escape, modifiers: [])
+    }
+}
+
+private struct DrawerSurfaceModifier: ViewModifier {
+    var width: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: width)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(CDTheme.panelSurface)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(CDTheme.hairline)
+            }
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(CDTheme.dockerBlue.opacity(0.45))
+                    .frame(width: 2)
+            }
+            .shadow(color: CDTheme.panelShadow, radius: 24, x: -8, y: 0)
+    }
+}
+
+extension View {
+    func drawerSurface(width: CGFloat) -> some View {
+        modifier(DrawerSurfaceModifier(width: width))
     }
 }
 
 struct DrawerPageLayout<Content: View, Drawer: View>: View {
     var isDrawerPresented: Bool
+    var onDismiss: (() -> Void)? = nil
+    var drawerWidth: CGFloat = 430
     @ViewBuilder var content: Content
     @ViewBuilder var drawer: Drawer
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            ScrollView {
-                content
-                    .padding(20)
-                    .padding(.trailing, isDrawerPresented ? 430 : 0)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
+        GeometryReader { proxy in
+            ZStack(alignment: .trailing) {
+                ScrollView {
+                    content
+                        .padding(20)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
 
-            if isDrawerPresented {
-                drawer
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .zIndex(2)
+                if isDrawerPresented {
+                    HStack(spacing: 0) {
+                        Color.black.opacity(0.001)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onDismiss?()
+                            }
+                        Spacer()
+                            .frame(width: drawerWidth + 32)
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .transition(.opacity)
+                    .zIndex(1)
+
+                    drawer
+                        .frame(width: drawerWidth, height: max(proxy.size.height - 32, 0), alignment: .top)
+                        .padding(.trailing, 16)
+                        .padding(.vertical, 16)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .zIndex(2)
+                }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
         }
         .animation(.snappy(duration: 0.22), value: isDrawerPresented)
     }
@@ -154,7 +233,7 @@ struct DetailInfoCard<Content: View>: View {
             content
         }
         .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(CDTheme.separator)

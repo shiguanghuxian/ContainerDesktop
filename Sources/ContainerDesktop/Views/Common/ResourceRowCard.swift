@@ -15,6 +15,6 @@ struct ResourceRowCard<Leading: View, Metadata: View, Actions: View>: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .background(isSelected ? CDTheme.dockerBlue.opacity(0.08) : Color.clear)
+        .background(isSelected ? CDTheme.selectionSurface : Color.clear)
     }
 }

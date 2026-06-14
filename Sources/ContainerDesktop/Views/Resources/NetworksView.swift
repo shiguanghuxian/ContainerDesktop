@@ -27,7 +27,9 @@ struct NetworksView: View {
     }
 
     var body: some View {
-        DrawerPageLayout(isDrawerPresented: selectedNetwork != nil) {
+        DrawerPageLayout(isDrawerPresented: selectedNetwork != nil, onDismiss: {
+            selectedName = nil
+        }) {
             pageContent
         } drawer: {
             if let selectedNetwork {
@@ -71,10 +73,19 @@ struct NetworksView: View {
                 Button {
                     showCreatePopover = true
                 } label: {
-                    Label(language.t(.createNetwork), systemImage: "plus.circle")
+                    if runtimeStore.isOperationActive(RuntimeOperationKey.networkCreate) {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(language.resolved == .zhHans ? "创建中" : "Creating")
+                        }
+                    } else {
+                        Label(language.t(.createNetwork), systemImage: "plus.circle")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .popover(isPresented: $showCreatePopover, arrowEdge: .bottom) {
+                .disabled(runtimeStore.activeOperationKey != nil)
+                .sheet(isPresented: $showCreatePopover) {
                     createNetworkForm
                 }
             }
@@ -98,6 +109,7 @@ struct NetworksView: View {
                 } rows: {
                     ForEach(filteredNetworks) { network in
                         ResourceTableRow(isSelected: selectedName == network.name) {
+                            let deleteKey = RuntimeOperationKey.networkDelete(network.name)
                             ResourceStatusDot(tint: .orange)
 
                             Text(network.name)
@@ -126,14 +138,14 @@ struct NetworksView: View {
                                 RowActionButton(systemImage: "sidebar.right") {
                                     selectNetwork(network)
                                 }
-                                DestructiveRowActionButton {
+                                DestructiveRowActionButton(
+                                    isLoading: runtimeStore.isOperationActive(deleteKey),
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey)
+                                ) {
                                     pendingDelete = network
                                 }
                             }
                             .frame(width: 78, alignment: .trailing)
-                        }
-                        .onTapGesture {
-                            selectNetwork(network)
                         }
                     }
                 }
@@ -180,6 +192,7 @@ struct NetworksView: View {
                     Task { await runtimeStore.createNetwork(name: name, subnet: ipv4, subnetV6: ipv6, internalOnly: internalFlag) }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(runtimeStore.activeOperationKey != nil)
             }
         }
         .padding(16)

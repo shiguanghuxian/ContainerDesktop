@@ -7,6 +7,14 @@ struct PageHeader<Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            horizontalLayout
+            verticalLayout
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var titleBlock: some View {
         HStack(alignment: .center, spacing: 14) {
             IconTile(systemImage: systemImage, tint: CDTheme.dockerBlue, size: 38)
 
@@ -21,10 +29,25 @@ struct PageHeader<Actions: View>: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .layoutPriority(1)
+        }
+    }
+
+    private var horizontalLayout: some View {
+        HStack(alignment: .center, spacing: 14) {
+            titleBlock
 
             Spacer(minLength: 16)
             actions
+                .buttonStyle(CDSecondaryButtonStyle())
         }
-        .padding(.vertical, 8)
+    }
+
+    private var verticalLayout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            titleBlock
+            actions
+                .buttonStyle(CDSecondaryButtonStyle())
+        }
     }
 }

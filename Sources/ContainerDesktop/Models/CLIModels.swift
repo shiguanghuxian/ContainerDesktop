@@ -31,6 +31,7 @@ struct ContainerSummary: Identifiable, Codable, Hashable, Sendable {
         var platform: Platform
         var resources: Resources
         var creationDate: Date?
+        var labels: [String: String]?
     }
 
     struct Status: Codable, Hashable, Sendable {
@@ -52,10 +53,115 @@ struct ContainerSummary: Identifiable, Codable, Hashable, Sendable {
     var cpuCount: Int { configuration.resources.cpus }
     var memoryDisplay: String { ByteCountFormatter.string(fromByteCount: configuration.resources.memoryInBytes, countStyle: .memory) }
     var state: String { status.state }
+    var labels: [String: String] { configuration.labels ?? [:] }
     var primaryIP: String { status.networks.compactMap(\.ipv4Address).first ?? "—" }
     var startedText: String {
         guard let startedDate = status.startedDate else { return "—" }
         return startedDate.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+struct MachineSummary: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    var status: String
+    var isDefault: Bool
+    var ipAddress: String?
+    var cpus: Int
+    var memory: UInt64
+    var diskSize: UInt64?
+    var createdDate: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case isDefault = "default"
+        case ipAddress
+        case cpus
+        case memory
+        case diskSize
+        case createdDate
+    }
+
+    var isRunning: Bool { status == "running" }
+    var statusText: String { status }
+    var ipAddressText: String { ipAddress ?? "—" }
+    var memoryDisplay: String {
+        ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)
+    }
+    var diskSizeDisplay: String {
+        guard let diskSize else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(diskSize), countStyle: .file)
+    }
+    var createdText: String {
+        guard let createdDate else { return "—" }
+        return createdDate.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+struct MachineInspection: Codable, Hashable, Sendable {
+    struct Image: Codable, Hashable, Sendable {
+        var reference: String?
+        var descriptor: JSONValue?
+
+        var referenceText: String { reference ?? "—" }
+    }
+
+    struct Platform: Codable, Hashable, Sendable {
+        var os: String?
+        var architecture: String?
+        var variant: String?
+
+        var displayName: String {
+            [os, architecture, variant]
+                .compactMap { $0?.nilIfBlank }
+                .joined(separator: "/")
+        }
+    }
+
+    struct UserSetup: Codable, Hashable, Sendable {
+        var username: String
+        var uid: UInt32
+        var gid: UInt32
+
+        var home: String { "/home/\(username)" }
+    }
+
+    var id: String
+    var image: Image
+    var platform: Platform
+    var userSetup: UserSetup
+    var status: String
+    var startedDate: Date?
+    var createdDate: Date?
+    var containerId: String?
+    var cpus: Int
+    var memory: UInt64
+    var homeMount: String
+    var diskSize: UInt64?
+    var ipAddress: String?
+
+    var platformText: String {
+        let value = platform.displayName
+        return value.isEmpty ? "—" : value
+    }
+
+    var startedText: String {
+        guard let startedDate else { return "—" }
+        return startedDate.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var createdText: String {
+        guard let createdDate else { return "—" }
+        return createdDate.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var memoryDisplay: String {
+        ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)
+    }
+
+    var diskSizeDisplay: String {
+        guard let diskSize else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(diskSize), countStyle: .file)
     }
 }
 
@@ -165,6 +271,91 @@ struct NetworkSummary: Identifiable, Codable, Hashable, Sendable {
 struct RegistrySummary: Identifiable, Codable, Hashable, Sendable {
     var id: String { server }
     var server: String
+    var username: String?
+    var creationDate: Date?
+    var modificationDate: Date?
+    var labels: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case server
+        case name
+        case id
+        case username
+        case creationDate
+        case modificationDate
+        case labels
+    }
+
+    init(
+        server: String,
+        username: String? = nil,
+        creationDate: Date? = nil,
+        modificationDate: Date? = nil,
+        labels: [String: String] = [:]
+    ) {
+        self.server = server
+        self.username = username
+        self.creationDate = creationDate
+        self.modificationDate = modificationDate
+        self.labels = labels
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let resolvedServer = try container.decodeIfPresent(String.self, forKey: .server)
+            ?? container.decodeIfPresent(String.self, forKey: .name)
+            ?? container.decodeIfPresent(String.self, forKey: .id)
+
+        guard let resolvedServer = resolvedServer?.nilIfBlank else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .server,
+                in: container,
+                debugDescription: "Registry entry is missing server, name, or id."
+            )
+        }
+
+        server = resolvedServer
+        username = try container.decodeIfPresent(String.self, forKey: .username)?.nilIfBlank
+        creationDate = try container.decodeIfPresent(Date.self, forKey: .creationDate)
+        modificationDate = try container.decodeIfPresent(Date.self, forKey: .modificationDate)
+        labels = try container.decodeIfPresent([String: String].self, forKey: .labels) ?? [:]
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(server, forKey: .server)
+        try container.encodeIfPresent(username, forKey: .username)
+        try container.encodeIfPresent(creationDate, forKey: .creationDate)
+        try container.encodeIfPresent(modificationDate, forKey: .modificationDate)
+        try container.encode(labels, forKey: .labels)
+    }
+
+    var displayName: String {
+        isDockerHub ? "Docker Hub" : server
+    }
+
+    var detailServer: String? {
+        displayName == server ? nil : server
+    }
+
+    var usernameText: String {
+        username ?? "—"
+    }
+
+    var createdText: String {
+        guard let creationDate else { return "—" }
+        return creationDate.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var isDockerHub: Bool {
+        let normalized = server
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return normalized == "docker.io"
+            || normalized == "registry-1.docker.io"
+            || normalized == "index.docker.io"
+            || normalized == "index.docker.io/v1"
+    }
 }
 
 struct ContainerStatsSnapshot: Identifiable, Codable, Hashable, Sendable {

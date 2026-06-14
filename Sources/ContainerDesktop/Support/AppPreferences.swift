@@ -83,20 +83,30 @@ enum L10nKey {
     case systemStopped
     case dashboard
     case containers
+    case machines
     case images
     case volumes
     case networks
     case compose
+    case observability
     case registries
+    case commandConverter
     case system
+    case help
+    case about
     case overview
     case manageContainers
+    case manageMachines
     case imageRegistry
     case storage
     case virtualNetworks
     case composeWorkflow
+    case observabilityWorkflow
     case registryLogins
+    case commandConverterWorkflow
     case engineConfig
+    case helpWorkflow
+    case aboutWorkflow
     case localResources
     case workflows
     case admin
@@ -104,13 +114,19 @@ enum L10nKey {
     case noComposeProjects
     case dashboardSubtitle
     case containersSubtitle
+    case machinesSubtitle
     case imagesSubtitle
     case volumesSubtitle
     case networksSubtitle
     case composeSubtitle
+    case observabilitySubtitle
     case registriesSubtitle
+    case commandConverterSubtitle
     case systemSubtitle
+    case helpSubtitle
+    case aboutSubtitle
     case noContainers
+    case noMachines
     case noImages
     case noVolumes
     case noNetworks
@@ -118,6 +134,7 @@ enum L10nKey {
     case noCompose
     case pull
     case create
+    case createMachine
     case delete
     case inspect
     case logs
@@ -174,6 +191,8 @@ enum L10nKey {
     case containerDefaults
     case builder
     case machine
+    case homeMount
+    case defaultMachine
     case emptyInstallCompose
     case loginInstructions
 }
@@ -198,20 +217,30 @@ extension L10nKey {
         case .systemStopped: "System 未启动"
         case .dashboard: "Dashboard"
         case .containers: "Containers"
+        case .machines: "Machines"
         case .images: "Images"
         case .volumes: "Volumes"
         case .networks: "Networks"
         case .compose: "Compose"
+        case .observability: "观测"
         case .registries: "Registries"
+        case .commandConverter: "Docker 转换"
         case .system: "System"
+        case .help: "帮助"
+        case .about: "关于"
         case .overview: "概览"
         case .manageContainers: "运行与管理"
+        case .manageMachines: "Linux 环境"
         case .imageRegistry: "镜像仓库"
         case .storage: "持久化存储"
         case .virtualNetworks: "虚拟网络"
         case .composeWorkflow: "多容器编排"
+        case .observabilityWorkflow: "日志与资源"
         case .registryLogins: "镜像登录"
+        case .commandConverterWorkflow: "迁移助手"
         case .engineConfig: "引擎与配置"
+        case .helpWorkflow: "使用指南"
+        case .aboutWorkflow: "应用信息"
         case .localResources: "本地资源"
         case .workflows: "工作流"
         case .admin: "管理"
@@ -219,13 +248,19 @@ extension L10nKey {
         case .noComposeProjects: "尚未添加项目。"
         case .dashboardSubtitle: "查看本机容器运行时、资源和 Compose 状态。"
         case .containersSubtitle: "启动、停止、删除容器，查看日志和资源快照。"
+        case .machinesSubtitle: "管理由 OCI 镜像创建的持久 Linux Machine。"
         case .imagesSubtitle: "拉取、检查、删除本地 OCI 镜像。"
         case .volumesSubtitle: "管理持久化数据卷和匿名卷。"
         case .networksSubtitle: "创建和检查 macOS 26+ 容器网络。"
         case .composeSubtitle: "通过 Container-Compose 管理多容器项目。"
+        case .observabilitySubtitle: "集中查看容器日志、CPU、内存、网络和 I/O 快照。"
         case .registriesSubtitle: "查看和管理镜像仓库登录状态。"
+        case .commandConverterSubtitle: "将常用 Docker 命令转换为 apple/container 命令，并快速复制迁移模板。"
         case .systemSubtitle: "管理 container system、版本、磁盘和默认配置。"
+        case .helpSubtitle: "快速了解常用工作流、快捷入口和排障方法。"
+        case .aboutSubtitle: "了解 ContainerDesktop、运行环境和项目能力边界。"
         case .noContainers: "没有容器"
+        case .noMachines: "没有 Machine"
         case .noImages: "没有镜像"
         case .noVolumes: "没有存储卷"
         case .noNetworks: "没有网络"
@@ -233,6 +268,7 @@ extension L10nKey {
         case .noCompose: "没有 Compose 项目"
         case .pull: "拉取"
         case .create: "创建"
+        case .createMachine: "创建 Machine"
         case .delete: "删除"
         case .inspect: "详情"
         case .logs: "日志"
@@ -289,6 +325,8 @@ extension L10nKey {
         case .containerDefaults: "容器默认值"
         case .builder: "构建器"
         case .machine: "虚拟机"
+        case .homeMount: "Home 挂载"
+        case .defaultMachine: "默认"
         case .emptyInstallCompose: "安装 container-compose 后才能运行 up、down 和 build。"
         case .loginInstructions: "登录说明"
         }
@@ -313,20 +351,30 @@ extension L10nKey {
         case .systemStopped: "System stopped"
         case .dashboard: "Dashboard"
         case .containers: "Containers"
+        case .machines: "Machines"
         case .images: "Images"
         case .volumes: "Volumes"
         case .networks: "Networks"
         case .compose: "Compose"
+        case .observability: "Observe"
         case .registries: "Registries"
+        case .commandConverter: "Docker Convert"
         case .system: "System"
+        case .help: "Help"
+        case .about: "About"
         case .overview: "Overview"
         case .manageContainers: "Run and manage"
+        case .manageMachines: "Linux environments"
         case .imageRegistry: "Image registry"
         case .storage: "Persistent storage"
         case .virtualNetworks: "Virtual networks"
         case .composeWorkflow: "Multi-container apps"
+        case .observabilityWorkflow: "Logs and metrics"
         case .registryLogins: "Registry logins"
+        case .commandConverterWorkflow: "Migration helper"
         case .engineConfig: "Engine and config"
+        case .helpWorkflow: "User guide"
+        case .aboutWorkflow: "App info"
         case .localResources: "Local Resources"
         case .workflows: "Workflows"
         case .admin: "Admin"
@@ -334,13 +382,19 @@ extension L10nKey {
         case .noComposeProjects: "No projects added."
         case .dashboardSubtitle: "Review local runtime, resources, and Compose status."
         case .containersSubtitle: "Start, stop, delete, inspect logs, and view resource snapshots."
+        case .machinesSubtitle: "Manage persistent Linux machines created from OCI images."
         case .imagesSubtitle: "Pull, inspect, and remove local OCI images."
         case .volumesSubtitle: "Manage persistent and anonymous volumes."
         case .networksSubtitle: "Create and inspect macOS 26+ container networks."
         case .composeSubtitle: "Manage multi-container apps with Container-Compose."
+        case .observabilitySubtitle: "Review container logs, CPU, memory, network, and I/O snapshots in one place."
         case .registriesSubtitle: "View and manage image registry logins."
+        case .commandConverterSubtitle: "Convert common Docker commands to apple/container commands and copy migration templates quickly."
         case .systemSubtitle: "Manage system service, versions, disk usage, and defaults."
+        case .helpSubtitle: "Learn common workflows, shortcuts, and troubleshooting paths."
+        case .aboutSubtitle: "Review ContainerDesktop, runtime environment, and product scope."
         case .noContainers: "No containers"
+        case .noMachines: "No Machines"
         case .noImages: "No images"
         case .noVolumes: "No volumes"
         case .noNetworks: "No networks"
@@ -348,6 +402,7 @@ extension L10nKey {
         case .noCompose: "No Compose projects"
         case .pull: "Pull"
         case .create: "Create"
+        case .createMachine: "Create Machine"
         case .delete: "Delete"
         case .inspect: "Inspect"
         case .logs: "Logs"
@@ -404,6 +459,8 @@ extension L10nKey {
         case .containerDefaults: "Container Defaults"
         case .builder: "Builder"
         case .machine: "Machine"
+        case .homeMount: "Home Mount"
+        case .defaultMachine: "Default"
         case .emptyInstallCompose: "Install container-compose before running up, down, or build."
         case .loginInstructions: "Login Instructions"
         }
