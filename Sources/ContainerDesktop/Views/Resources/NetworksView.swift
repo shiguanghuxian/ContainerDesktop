@@ -85,6 +85,7 @@ struct NetworksView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(runtimeStore.activeOperationKey != nil)
+                .help(language.resolved == .zhHans ? "打开创建网络表单" : "Open the create network form")
                 .sheet(isPresented: $showCreatePopover) {
                     createNetworkForm
                 }
@@ -135,12 +136,16 @@ struct NetworksView: View {
                                 .frame(width: 140, alignment: .leading)
 
                             HStack(spacing: 8) {
-                                RowActionButton(systemImage: "sidebar.right") {
+                                RowActionButton(
+                                    systemImage: "sidebar.right",
+                                    help: language.resolved == .zhHans ? "打开网络详情抽屉" : "Open network details drawer"
+                                ) {
                                     selectNetwork(network)
                                 }
                                 DestructiveRowActionButton(
                                     isLoading: runtimeStore.isOperationActive(deleteKey),
-                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey)
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey),
+                                    help: language.resolved == .zhHans ? "删除网络" : "Delete network"
                                 ) {
                                     pendingDelete = network
                                 }
@@ -179,6 +184,7 @@ struct NetworksView: View {
                 Button("取消") {
                     showCreatePopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消创建网络" : "Cancel creating network")
                 Button(language.t(.create)) {
                     let name = newNetworkName
                     let ipv4 = subnet
@@ -193,6 +199,7 @@ struct NetworksView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(runtimeStore.activeOperationKey != nil)
+                .help(language.resolved == .zhHans ? "创建网络" : "Create network")
             }
         }
         .padding(16)

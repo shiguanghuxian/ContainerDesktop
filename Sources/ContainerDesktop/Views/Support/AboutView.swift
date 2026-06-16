@@ -45,10 +45,12 @@ struct AboutView: View {
                         Label(localized("复制环境信息", "Copy Environment"), systemImage: "doc.on.doc")
                     }
                     .buttonStyle(.borderedProminent)
+                    .help(localized("复制环境信息", "Copy environment information"))
 
                     Link(destination: URL(string: "https://github.com/apple/container")!) {
                         Label("apple/container", systemImage: "safari")
                     }
+                    .help(localized("打开 apple/container 项目页", "Open the apple/container project page"))
                 }
             }
 
@@ -139,12 +141,14 @@ struct AboutView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!appUpdateStore.canRunPrimaryAction)
+                    .help(updatePrimaryActionTitle)
 
                     Button {
                         appUpdateStore.openReleasePage()
                     } label: {
                         Label(localized("打开发布页", "Open Release Page"), systemImage: "safari")
                     }
+                    .help(localized("打开最新版本发布页", "Open the latest release page"))
                 }
 
                 if let releaseNotes = appUpdateStore.releaseNotesPreview {

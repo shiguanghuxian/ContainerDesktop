@@ -7,7 +7,9 @@ struct RegistriesView: View {
     @State private var searchText = ""
     @State private var pendingLogout: RegistrySummary?
     @State private var showLoginPopover = false
+    @State private var loginServerMode: RegistryLoginServerMode = .preset
     @State private var loginServer = "docker.io"
+    @State private var customLoginServer = ""
     @State private var loginUsername = ""
     @State private var loginPassword = ""
     @State private var showBrowserDrawer = false
@@ -15,7 +17,7 @@ struct RegistriesView: View {
     @State private var dockerHubQuery = "nginx"
     @State private var customRegistryServer = "registry-1.docker.io"
     @State private var customRepository = "library/nginx"
-    @State private var isRegistryV2Expanded = false
+    @State private var browserContext: RegistryBrowserContext = .dockerHub
     @State private var selectedTagList: RegistryTagListSelection?
     @State private var selectedTagDetail: RegistryTagDetailSelection?
 
@@ -34,9 +36,17 @@ struct RegistriesView: View {
 
     private var isLoginSubmitDisabled: Bool {
         runtimeStore.isRegistryOperationRunning
-            || loginServer.trimmed.isEmpty
+            || !loginServerSelection.canSubmit
             || loginUsername.trimmed.isEmpty
             || loginPassword.isEmpty
+    }
+
+    private var loginServerSelection: RegistryLoginServerSelection {
+        RegistryLoginServerSelection(
+            mode: loginServerMode,
+            presetServer: loginServer,
+            customServer: customLoginServer
+        )
     }
 
     var body: some View {
@@ -68,11 +78,11 @@ struct RegistriesView: View {
     @ViewBuilder
     private var registryBrowserDrawerStack: some View {
         RegistryBrowserDrawer(
+            context: browserContext,
             store: browserStore,
             query: $dockerHubQuery,
             customRegistryServer: $customRegistryServer,
             customRepository: $customRepository,
-            isRegistryV2Expanded: $isRegistryV2Expanded,
             selectedTagList: selectedTagList,
             selectedTagDetail: selectedTagDetail,
             onClose: closeBrowserDrawer,
@@ -89,11 +99,12 @@ struct RegistriesView: View {
     }
 
     private func openDockerHubBrowser() {
+        browserContext = .dockerHub
         if dockerHubQuery.trimmed.isEmpty {
             dockerHubQuery = "nginx"
         }
         browserStore.searchQuery = dockerHubQuery.trimmed
-        isRegistryV2Expanded = false
+        browserStore.resetRegistryV2State()
         selectedTagList = nil
         selectedTagDetail = nil
         showBrowserDrawer = true
@@ -102,22 +113,20 @@ struct RegistriesView: View {
     private func openRegistryV2Browser(for registry: RegistrySummary) {
         customRegistryServer = registry.registryBrowseServer
         customRepository = ""
+        browserContext = .registryV2(server: customRegistryServer)
         browserStore.customRegistryServer = customRegistryServer
         browserStore.customRepository = customRepository
-        browserStore.selectedCustomRegistryTag = nil
-        browserStore.customRegistryTags = []
-        browserStore.customRegistryNextCursor = nil
-        browserStore.customRegistryCursorStack = []
-        isRegistryV2Expanded = true
+        browserStore.resetRegistryV2State()
         selectedTagList = nil
         selectedTagDetail = nil
         showBrowserDrawer = true
     }
 
     private func openBrowser(for registry: RegistrySummary) {
-        if registry.isDockerHubRegistry {
+        switch RegistryBrowserContext.context(for: registry) {
+        case .dockerHub:
             openDockerHubBrowser()
-        } else {
+        case .registryV2:
             openRegistryV2Browser(for: registry)
         }
     }
@@ -132,16 +141,15 @@ struct RegistriesView: View {
         showTagList(selection)
     }
 
-    private func openRegistryV2TagList() {
-        let server = browserStore.customRegistryServer.trimmed
-        let repository = browserStore.customRepository.trimmed
+    private func openRegistryV2TagList(_ result: RegistryV2RepositoryResult) {
+        let server = result.server.trimmed
+        let repository = result.repository.trimmed
         guard !server.isEmpty, !repository.isEmpty else { return }
-        let reference = "\(server)/\(repository)"
         let selection = RegistryTagListSelection(
             source: .registryV2,
             title: language.resolved == .zhHans ? "Registry v2 标签" : "Registry v2 Tags",
             displayName: repository,
-            repository: reference
+            repository: "\(server)/\(repository)"
         )
         showTagList(selection)
     }
@@ -198,6 +206,7 @@ struct RegistriesView: View {
                     } label: {
                         Label(language.resolved == .zhHans ? "浏览镜像" : "Browse Images", systemImage: "safari")
                     }
+                    .help(language.resolved == .zhHans ? "打开 Docker Hub 镜像浏览" : "Open Docker Hub image browser")
 
                     Button {
                         showLoginPopover = true
@@ -209,6 +218,7 @@ struct RegistriesView: View {
                         loginForm
                     }
                     .disabled(runtimeStore.isRegistryOperationRunning)
+                    .help(language.resolved == .zhHans ? "登录镜像仓库" : "Login to a registry")
 
                     Button {
                         Task { await runtimeStore.refreshRegistries(reportSuccess: true) }
@@ -216,6 +226,7 @@ struct RegistriesView: View {
                         Label(language.t(.refresh), systemImage: "arrow.clockwise")
                     }
                     .disabled(runtimeStore.isRegistryOperationRunning)
+                    .help(language.resolved == .zhHans ? "刷新仓库登录列表" : "Refresh registry logins")
                 }
             }
 
@@ -274,10 +285,12 @@ struct RegistriesView: View {
                                 ) {
                                     openBrowser(for: registry)
                                 }
-                                DestructiveRowActionButton(systemImage: "rectangle.portrait.and.arrow.right") {
+                                DestructiveRowActionButton(
+                                    systemImage: "rectangle.portrait.and.arrow.right",
+                                    help: language.resolved == .zhHans ? "退出登录" : "Logout"
+                                ) {
                                     pendingLogout = registry
                                 }
-                                .help(language.resolved == .zhHans ? "退出登录" : "Logout")
                             }
                             .frame(width: registryActionColumnWidth, alignment: .trailing)
                         }
@@ -292,14 +305,38 @@ struct RegistriesView: View {
             Text(language.resolved == .zhHans ? "登录镜像仓库" : "Login to Registry")
                 .font(.headline)
 
-            Picker(language.resolved == .zhHans ? "仓库" : "Registry", selection: $loginServer) {
-                ForEach(FormPresetOptions.choices(current: loginServer, suggestions: FormPresetOptions.registries), id: \.self) { server in
-                    Text(server).tag(server)
-                }
-            }
-            .labelsHidden()
+            ThemedSegmentedPicker(
+                options: RegistryLoginServerMode.allCases,
+                selection: $loginServerMode,
+                title: loginServerModeTitle
+            )
             .frame(width: 320)
             .disabled(runtimeStore.isRegistryOperationRunning)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if loginServerMode == .preset {
+                    Picker(language.resolved == .zhHans ? "仓库" : "Registry", selection: $loginServer) {
+                        ForEach(FormPresetOptions.choices(current: loginServer, suggestions: FormPresetOptions.registries), id: \.self) { server in
+                            Text(server).tag(server)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 320)
+                    .disabled(runtimeStore.isRegistryOperationRunning)
+                } else {
+                    TextField("registry.example.com:5000", text: $customLoginServer)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 320)
+                        .disabled(runtimeStore.isRegistryOperationRunning)
+
+                    Text(language.resolved == .zhHans
+                        ? "支持私有 Registry 域名或 host:port，不需要填写镜像路径。"
+                        : "Use a registry domain or host:port. Do not include an image path.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 320, alignment: .leading)
+                }
+            }
 
             TextField(language.resolved == .zhHans ? "用户名" : "Username", text: $loginUsername)
                 .textFieldStyle(.roundedBorder)
@@ -328,8 +365,9 @@ struct RegistriesView: View {
                     loginPassword = ""
                 }
                 .disabled(runtimeStore.isRegistryOperationRunning)
+                .help(language.resolved == .zhHans ? "取消登录" : "Cancel login")
                 Button {
-                    let server = loginServer
+                    let server = loginServerSelection.resolvedServer
                     let username = loginUsername
                     let password = loginPassword
                     loginPassword = ""
@@ -350,9 +388,19 @@ struct RegistriesView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isLoginSubmitDisabled)
+                .help(language.resolved == .zhHans ? "登录当前仓库" : "Login to the selected registry")
             }
         }
         .padding(16)
+    }
+
+    private func loginServerModeTitle(_ mode: RegistryLoginServerMode) -> String {
+        switch mode {
+        case .preset:
+            return language.resolved == .zhHans ? "常用仓库" : "Presets"
+        case .custom:
+            return language.resolved == .zhHans ? "自定义地址" : "Custom"
+        }
     }
 
     private var registryHeader: some View {
@@ -368,16 +416,16 @@ struct RegistriesView: View {
 
 private struct RegistryBrowserDrawer: View {
     @Environment(\.appLanguage) private var language
+    var context: RegistryBrowserContext
     @Bindable var store: RegistryBrowserStore
     @Binding var query: String
     @Binding var customRegistryServer: String
     @Binding var customRepository: String
-    @Binding var isRegistryV2Expanded: Bool
     var selectedTagList: RegistryTagListSelection?
     var selectedTagDetail: RegistryTagDetailSelection?
     var onClose: () -> Void
     var onOpenDockerHubRepository: (RegistryRepositoryResult) -> Void
-    var onOpenRegistryV2Tags: () -> Void
+    var onOpenRegistryV2Tags: (RegistryV2RepositoryResult) -> Void
     var onResetTagSelection: () -> Void
     var onCloseTagList: () -> Void
     var onCloseTagDetail: () -> Void
@@ -413,10 +461,15 @@ private struct RegistryBrowserDrawer: View {
             }
         }
         .drawerSurface(width: 840)
-        .task {
-            if store.repositories.isEmpty {
-                store.searchQuery = query
-                await store.searchDockerHub()
+        .task(id: context) {
+            switch context {
+            case .dockerHub:
+                if store.repositories.isEmpty {
+                    store.searchQuery = query
+                    await store.searchDockerHub()
+                }
+            case .registryV2:
+                break
             }
         }
     }
@@ -425,7 +478,7 @@ private struct RegistryBrowserDrawer: View {
         VStack(spacing: 0) {
             DrawerHeader(
                 title: language.resolved == .zhHans ? "浏览镜像" : "Browse Images",
-                subtitle: "Docker Hub + Registry v2",
+                subtitle: context.displayName,
                 systemImage: "magnifyingglass",
                 onClose: onClose
             )
@@ -436,11 +489,11 @@ private struct RegistryBrowserDrawer: View {
                 VStack(alignment: .leading, spacing: 14) {
                     RegistryBrowserNotice()
                     RegistryBrowserPanel(
+                        context: context,
                         store: store,
                         query: $query,
                         customRegistryServer: $customRegistryServer,
                         customRepository: $customRepository,
-                        isRegistryV2Expanded: $isRegistryV2Expanded,
                         onOpenDockerHubRepository: onOpenDockerHubRepository,
                         onOpenRegistryV2Tags: onOpenRegistryV2Tags,
                         onResetTagSelection: onResetTagSelection
@@ -464,7 +517,7 @@ private struct RegistryBrowserNotice: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(language.t(.loginInstructions))
                     .font(.callout.weight(.semibold))
-                Text(language.resolved == .zhHans ? "登录信息由 container CLI 写入 macOS 钥匙串；自定义 Registry 浏览只用于本次查询，不在 ContainerDesktop 保存密码。" : "Credentials are written by the container CLI to macOS Keychain. Custom Registry browser credentials are used for this query only and are not saved by ContainerDesktop.")
+                Text(language.resolved == .zhHans ? "登录信息由 container CLI 写入 macOS 钥匙串；私有 Registry 浏览会自动读取该凭据，ContainerDesktop 不保存密码。" : "Credentials are written by the container CLI to macOS Keychain. Private registry browsing reads those credentials and ContainerDesktop does not save passwords.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -482,56 +535,74 @@ private struct RegistryBrowserNotice: View {
 
 private struct RegistryBrowserPanel: View {
     @Environment(\.appLanguage) private var language
+    var context: RegistryBrowserContext
     @Bindable var store: RegistryBrowserStore
     @Binding var query: String
     @Binding var customRegistryServer: String
     @Binding var customRepository: String
-    @Binding var isRegistryV2Expanded: Bool
     var onOpenDockerHubRepository: (RegistryRepositoryResult) -> Void
-    var onOpenRegistryV2Tags: () -> Void
+    var onOpenRegistryV2Tags: (RegistryV2RepositoryResult) -> Void
     var onResetTagSelection: () -> Void
 
     var body: some View {
         PanelView(
             title: language.resolved == .zhHans ? "Registry 浏览" : "Registry Browser",
-            subtitle: "Docker Hub + Registry v2",
+            subtitle: context.displayName,
             systemImage: "magnifyingglass"
         ) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
-                    TextField("nginx", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                    Button {
-                        onResetTagSelection()
-                        store.searchQuery = query
-                        Task { await store.searchDockerHub(page: 1) }
-                    } label: {
-                        if store.isSearching {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Label(language.t(.search), systemImage: "magnifyingglass")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.isSearching)
-                }
-
-                if let errorMessage = store.errorMessage {
-                    StatusBanner(text: errorMessage, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
-                }
-
-                repositoryList
-
-                RegistryV2BrowserSection(
-                    store: store,
-                    isExpanded: $isRegistryV2Expanded,
-                    customRegistryServer: $customRegistryServer,
-                    customRepository: $customRepository,
-                    onOpenTags: onOpenRegistryV2Tags
-                )
+            switch context {
+            case .dockerHub:
+                dockerHubContent
+            case .registryV2(let server):
+                registryV2Content(server: server)
             }
         }
+    }
+
+    private var dockerHubContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                TextField("nginx", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    onResetTagSelection()
+                    store.searchQuery = query
+                    Task { await store.searchDockerHub(page: 1) }
+                } label: {
+                    if store.isSearching {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(language.t(.search), systemImage: "magnifyingglass")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isSearching || query.trimmed.isEmpty)
+                .help(language.resolved == .zhHans ? "搜索 Docker Hub 镜像" : "Search Docker Hub images")
+            }
+
+            if let errorMessage = store.errorMessage {
+                StatusBanner(text: errorMessage, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
+            }
+
+            repositoryList
+        }
+    }
+
+    private func registryV2Content(server: String) -> some View {
+        RegistryV2ManualLookupSection(
+            store: store,
+            server: server,
+            customRegistryServer: $customRegistryServer,
+            customRepository: $customRepository,
+            onSearchRepository: searchCustomRepository,
+            onOpenTags: onOpenRegistryV2Tags,
+            onResetTagSelection: onResetTagSelection
+        )
+    }
+
+    private func searchCustomRepository() {
+        Task { await store.searchCustomRepository() }
     }
 
     private var repositoryList: some View {
@@ -592,6 +663,7 @@ private struct RegistryBrowserPanel: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .help(language.resolved == .zhHans ? "查看镜像标签" : "View image tags")
                     Divider()
                 }
             }
@@ -601,6 +673,7 @@ private struct RegistryBrowserPanel: View {
                     Task { await store.loadPreviousRepositoryPage() }
                 }
                 .disabled(store.repositoryPage <= 1 || store.isSearching)
+                .help(language.resolved == .zhHans ? "上一页搜索结果" : "Previous search results page")
                 Text("\(store.repositoryPage)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -609,6 +682,7 @@ private struct RegistryBrowserPanel: View {
                     Task { await store.loadNextRepositoryPage() }
                 }
                 .disabled(!store.repositoryHasNext || store.isSearching)
+                .help(language.resolved == .zhHans ? "下一页搜索结果" : "Next search results page")
                 Spacer()
             }
         }
@@ -622,64 +696,62 @@ private struct RegistryBrowserPanel: View {
     }
 }
 
-private struct RegistryV2BrowserSection: View {
+private struct RegistryV2ManualLookupSection: View {
     @Environment(\.appLanguage) private var language
     @Bindable var store: RegistryBrowserStore
-    @Binding var isExpanded: Bool
+    var server: String
     @Binding var customRegistryServer: String
     @Binding var customRepository: String
-    var onOpenTags: () -> Void
+    var onSearchRepository: () -> Void
+    var onOpenTags: (RegistryV2RepositoryResult) -> Void
+    var onResetTagSelection: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .foregroundStyle(CDTheme.dockerBlue)
-                        .frame(width: 18, height: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Registry v2 tags/list")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(language.resolved == .zhHans ? "用于私有仓库或非 Docker Hub 的一次性查询" : "One-off lookup for private registries or non-Docker Hub repositories")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    if store.isLoadingTags || store.isLoadingCustomTagDetails {
-                        StableLoadingIndicator(text: language.resolved == .zhHans ? "读取中" : "Loading")
-                    }
-                }
-                .contentShape(Rectangle())
-                .padding(12)
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                Divider()
-                VStack(alignment: .leading, spacing: 12) {
-                    registryInputs
-                }
-                .padding(12)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            registryControls
+            manualRepositoryLookup
+            repositorySearchResult
         }
-        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(CDTheme.separator)
+        .onAppear {
+            customRegistryServer = server
+            store.customRegistryServer = server
+        }
+        .onChange(of: customRepository) { _, newValue in
+            guard newValue.trimmed.isEmpty || newValue.trimmed != store.customRepository.trimmed else { return }
+            store.resetCustomRegistryTags()
+            onResetTagSelection()
+        }
+        .onChange(of: store.customRegistryScheme) { _, _ in
+            store.resetCustomRegistryTags()
+            onResetTagSelection()
         }
     }
 
-    private var registryInputs: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var registryControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "network")
+                    .foregroundStyle(CDTheme.dockerBlue)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(language.resolved == .zhHans ? "当前 Registry" : "Current Registry")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Text(server)
+                        .font(.callout.weight(.semibold).monospaced())
+                        .lineLimit(1)
+                    Text(language.resolved == .zhHans ? "只查询当前仓库中心。输入 repository 后会使用 container 登录写入的钥匙串凭据读取 tags。" : "Queries only this registry. Enter a repository and tags are loaded with credentials from the container Keychain login.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                if store.isLoadingTags {
+                    StableLoadingIndicator(text: language.resolved == .zhHans ? "读取中" : "Loading")
+                }
+            }
+
             HStack(spacing: 8) {
                 Picker("scheme", selection: $store.customRegistryScheme) {
                     Text("https").tag("https")
@@ -687,25 +759,40 @@ private struct RegistryV2BrowserSection: View {
                 }
                 .labelsHidden()
                 .frame(width: 88)
-                TextField("registry-1.docker.io", text: $customRegistryServer)
-                    .textFieldStyle(.roundedBorder)
-                TextField("library/nginx", text: $customRepository)
-                    .textFieldStyle(.roundedBorder)
+
+                Text(language.resolved == .zhHans ? "认证：使用已登录的钥匙串凭据" : "Auth: uses saved Keychain credentials")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer()
+            }
+        }
+        .padding(12)
+        .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.separator)
+        }
+    }
+
+    private var manualRepositoryLookup: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(language.resolved == .zhHans ? "手动查询 repository" : "Manual repository lookup")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Text(language.resolved == .zhHans ? "仅查询当前 Registry：\(server)。请输入 repository 名称，不需要填写 server。" : "Queries only \(server). Enter the repository name without the server.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let errorMessage = store.errorMessage {
+                StatusBanner(text: errorMessage, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
             }
             HStack(spacing: 8) {
-                TextField(language.resolved == .zhHans ? "用户名（可选）" : "Username (optional)", text: $store.customRegistryUsername)
-                    .textFieldStyle(.roundedBorder)
-                SecureField(language.resolved == .zhHans ? "密码或 Token（不保存）" : "Password or token (not saved)", text: $store.customRegistryPassword)
+                TextField("team/app", text: $customRepository)
                     .textFieldStyle(.roundedBorder)
                 Button {
-                    store.customRegistryServer = customRegistryServer
-                    store.customRepository = customRepository
-                    store.customRegistryTags = []
-                    store.selectedCustomRegistryTag = nil
-                    store.customRegistryNextCursor = nil
-                    store.customRegistryCursorStack = []
-                    onOpenTags()
-                    Task { await store.loadCustomRegistryTags() }
+                    submitSearch()
                 } label: {
                     HStack(spacing: 7) {
                         if store.isLoadingTags {
@@ -720,9 +807,95 @@ private struct RegistryV2BrowserSection: View {
                     .frame(width: 94)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.isLoadingTags || customRegistryServer.trimmed.isEmpty || customRepository.trimmed.isEmpty)
+                .disabled(store.isLoadingTags || customRepository.trimmed.isEmpty)
+                .help(language.resolved == .zhHans ? "查询当前 Registry 中的 repository" : "Search the repository in the current registry")
             }
         }
+        .padding(12)
+        .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.separator)
+        }
+    }
+
+    private var repositorySearchResult: some View {
+        Group {
+            if let result = store.customRegistryRepositoryResult {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(language.resolved == .zhHans ? "搜索结果" : "Search Result")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    Button {
+                        openTags(for: result)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "shippingbox")
+                                .foregroundStyle(CDTheme.dockerBlue)
+                                .frame(width: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.repository)
+                                    .font(.callout.weight(.semibold).monospaced())
+                                    .lineLimit(1)
+                                Text(resultSummaryText(for: result))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Text(tagCountText(for: result))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(CDTheme.separator)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(language.resolved == .zhHans ? "打开标签列表" : "Open tag list")
+                }
+            }
+        }
+    }
+
+    private func submitSearch() {
+        let repository = customRepository.trimmed
+        guard !repository.isEmpty else { return }
+        customRegistryServer = server
+        store.customRegistryServer = server
+        store.customRepository = repository
+        store.resetCustomRegistryTags()
+        onResetTagSelection()
+        onSearchRepository()
+    }
+
+    private func openTags(for result: RegistryV2RepositoryResult) {
+        customRegistryServer = result.server
+        customRepository = result.repository
+        store.customRegistryServer = result.server
+        store.customRepository = result.repository
+        store.customRegistryRepositoryResult = result
+        onOpenTags(result)
+    }
+
+    private func resultSummaryText(for result: RegistryV2RepositoryResult) -> String {
+        if language.resolved == .zhHans {
+            return result.hasNextPage ? "已加载 \(result.tagCount) 个 tags，可能还有更多" : "已加载 \(result.tagCount) 个 tags"
+        }
+        return result.hasNextPage ? "\(result.tagCount) tags loaded, more may exist" : "\(result.tagCount) tags loaded"
+    }
+
+    private func tagCountText(for result: RegistryV2RepositoryResult) -> String {
+        "\(result.tagCount)"
     }
 }
 
@@ -878,11 +1051,13 @@ private struct RegistryTagListOverlay: View {
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .help(language.resolved == .zhHans ? "打开 Tag 详情" : "Open tag details")
 
             Button(language.t(.pull)) {
                 onPull(selection.reference(for: tag))
             }
             .buttonStyle(.borderless)
+            .help(language.resolved == .zhHans ? "拉取此 Tag" : "Pull this tag")
         }
         .padding(.horizontal, 10)
         .frame(height: 54)
@@ -902,6 +1077,7 @@ private struct RegistryTagListOverlay: View {
                 }
             }
             .disabled(isPreviousDisabled)
+            .help(language.resolved == .zhHans ? "上一页标签" : "Previous tag page")
             Text(pageText)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -916,6 +1092,7 @@ private struct RegistryTagListOverlay: View {
                 }
             }
             .disabled(isNextDisabled)
+            .help(language.resolved == .zhHans ? "下一页标签" : "Next tag page")
             Spacer()
         }
     }
@@ -1068,10 +1245,12 @@ private struct RegistryTagDetailCard: View {
                     Label(language.resolved == .zhHans ? "复制引用" : "Copy Reference", systemImage: "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
+                .help(language.resolved == .zhHans ? "复制完整镜像引用" : "Copy full image reference")
                 Button(language.t(.pull)) {
                     onPull()
                 }
                 .buttonStyle(.borderedProminent)
+                .help(language.resolved == .zhHans ? "拉取此镜像 Tag" : "Pull this image tag")
             }
 
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {

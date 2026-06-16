@@ -47,18 +47,21 @@ struct DependencyInstallGuideView: View {
                             Label(localized("打开终端安装", "Install in Terminal"), systemImage: "terminal")
                         }
                         .buttonStyle(.borderedProminent)
+                        .help(localized("在终端中运行安装命令", "Run install commands in Terminal"))
 
                         Button {
                             copy(allCommands)
                         } label: {
                             Label(localized("复制全部命令", "Copy All Commands"), systemImage: "doc.on.doc")
                         }
+                        .help(localized("复制全部安装命令", "Copy all install commands"))
 
                         Button {
                             onRefresh()
                         } label: {
                             Label(localized("刷新状态", "Refresh Status"), systemImage: "arrow.clockwise")
                         }
+                        .help(localized("刷新依赖安装状态", "Refresh dependency status"))
 
                         Spacer()
                     }

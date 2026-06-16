@@ -75,6 +75,7 @@ struct MachineExecTabView: View {
             } label: {
                 Label(language.resolved == .zhHans ? "外部终端" : "External Terminal", systemImage: "macwindow")
             }
+            .help(language.resolved == .zhHans ? "在外部终端打开 Machine" : "Open Machine in external terminal")
 
             Button {
                 Task { await connect() }
@@ -83,6 +84,7 @@ struct MachineExecTabView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(store.terminalState.isConnected || store.terminalState == .connecting)
+            .help(language.resolved == .zhHans ? "连接 Machine 终端" : "Connect Machine terminal")
 
             Button {
                 disconnect()
@@ -90,6 +92,7 @@ struct MachineExecTabView: View {
                 Label(language.resolved == .zhHans ? "断开" : "Disconnect", systemImage: "xmark.circle")
             }
             .disabled(!store.terminalState.isConnected)
+            .help(language.resolved == .zhHans ? "断开 Machine 终端" : "Disconnect Machine terminal")
 
             Button {
                 store.clearTerminal()

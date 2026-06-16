@@ -3,6 +3,7 @@ import SwiftUI
 struct ContainerDetailPage: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
+    @Bindable var statsHistoryStore: ContainerStatsHistoryStore
     var containerID: String
     var parentTitle: String?
     @Binding var isPresented: Bool
@@ -10,8 +11,15 @@ struct ContainerDetailPage: View {
     @State private var detailStore: ContainerDetailStore
     @State private var isConfirmingDelete = false
 
-    init(runtimeStore: RuntimeStore, containerID: String, parentTitle: String? = nil, isPresented: Binding<Bool>) {
+    init(
+        runtimeStore: RuntimeStore,
+        statsHistoryStore: ContainerStatsHistoryStore,
+        containerID: String,
+        parentTitle: String? = nil,
+        isPresented: Binding<Bool>
+    ) {
         self.runtimeStore = runtimeStore
+        self.statsHistoryStore = statsHistoryStore
         self.containerID = containerID
         self.parentTitle = parentTitle
         _isPresented = isPresented
@@ -79,7 +87,7 @@ struct ContainerDetailPage: View {
         case .files:
             ContainerFilesTabView(store: detailStore)
         case .stats:
-            ContainerStatsTabView(store: detailStore, container: container)
+            ContainerStatsTabView(statsHistoryStore: statsHistoryStore, container: container)
         }
     }
 
@@ -87,7 +95,6 @@ struct ContainerDetailPage: View {
         Task {
             if container.state == "running" {
                 detailStore.stopTerminal()
-                detailStore.stopStatsPolling()
                 await runtimeStore.stopContainer(container.id)
             } else {
                 await runtimeStore.startContainer(container.id)
@@ -99,12 +106,8 @@ struct ContainerDetailPage: View {
     private func restart(_ container: ContainerSummary) {
         Task {
             detailStore.stopTerminal()
-            detailStore.stopStatsPolling()
             await runtimeStore.restartContainer(container.id)
             await detailStore.refreshInspect()
-            if detailStore.selectedTab == .stats {
-                detailStore.startStatsPolling()
-            }
         }
     }
 

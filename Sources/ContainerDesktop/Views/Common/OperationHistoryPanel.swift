@@ -29,6 +29,7 @@ struct OperationHistoryPanel: View {
                         }
                         .buttonStyle(.borderless)
                         .disabled(!records.contains { $0.status.isFinished })
+                        .help(language.resolved == .zhHans ? "清理已完成任务记录" : "Clear finished operation records")
                     }
                 }
             }

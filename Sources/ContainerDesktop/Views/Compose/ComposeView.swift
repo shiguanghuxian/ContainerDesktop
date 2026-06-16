@@ -11,6 +11,7 @@ struct ComposeView: View {
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var composeStore: ComposeProjectStore
     @Bindable var operationStore: AppOperationStore
+    @Bindable var statsHistoryStore: ContainerStatsHistoryStore
 
     @State private var showImporter = false
     @State private var searchText = ""
@@ -73,6 +74,7 @@ struct ComposeView: View {
             if let container = detailContainer {
                 ContainerDetailPage(
                     runtimeStore: runtimeStore,
+                    statsHistoryStore: statsHistoryStore,
                     containerID: detailContainerID ?? container.id,
                     parentTitle: language.t(.compose),
                     isPresented: Binding(
@@ -201,21 +203,25 @@ struct ComposeView: View {
                         Label(language.t(.addProject), systemImage: "folder.badge.plus")
                     }
                     .buttonStyle(.borderedProminent)
+                    .help(language.resolved == .zhHans ? "添加 Compose 项目" : "Add Compose project")
                     Button {
                         Task { await composeStore.reloadProjects() }
                     } label: {
                         Label(language.t(.reload), systemImage: "arrow.clockwise")
                     }
+                    .help(language.resolved == .zhHans ? "重新加载 Compose 项目" : "Reload Compose projects")
                     Button {
                         Task { await composeStore.refreshVersion() }
                     } label: {
                         Label(language.t(.version), systemImage: "number")
                     }
+                    .help(language.resolved == .zhHans ? "刷新 Compose 版本" : "Refresh Compose version")
                     Button {
                         openTasksDrawer()
                     } label: {
                         Label(language.resolved == .zhHans ? "Compose 任务" : "Compose Tasks", systemImage: "clock.arrow.circlepath")
                     }
+                    .help(language.resolved == .zhHans ? "打开 Compose 任务列表" : "Open Compose tasks")
                 }
             }
 
@@ -333,13 +339,17 @@ struct ComposeView: View {
                                     .frame(width: 140, alignment: .leading)
 
                                 HStack(spacing: 7) {
-                                    RowActionButton(systemImage: "sidebar.right") {
+                                    RowActionButton(
+                                        systemImage: "sidebar.right",
+                                        help: language.resolved == .zhHans ? "打开项目详情抽屉" : "Open project details drawer"
+                                    ) {
                                         selectProject(project)
                                     }
                                     RowActionButton(
                                         systemImage: "hammer",
                                         isLoading: activeComposeOperationKey == buildKey,
-                                        isDisabled: isComposeOperationBlocked(except: buildKey)
+                                        isDisabled: isComposeOperationBlocked(except: buildKey),
+                                        help: language.resolved == .zhHans ? "构建项目镜像" : "Build project images"
                                     ) {
                                         runComposeOperation(.build, project: project)
                                     }
@@ -347,7 +357,8 @@ struct ComposeView: View {
                                         systemImage: "arrow.triangle.2.circlepath",
                                         tint: CDTheme.violet,
                                         isLoading: activeComposeOperationKey == rebuildKey,
-                                        isDisabled: isComposeOperationBlocked(except: rebuildKey)
+                                        isDisabled: isComposeOperationBlocked(except: rebuildKey),
+                                        help: language.resolved == .zhHans ? "重新构建并启动项目" : "Rebuild and start project"
                                     ) {
                                         runComposeOperation(.rebuild, project: project)
                                     }
@@ -355,7 +366,8 @@ struct ComposeView: View {
                                         systemImage: "play.fill",
                                         tint: CDTheme.lime,
                                         isLoading: activeComposeOperationKey == upKey,
-                                        isDisabled: isComposeOperationBlocked(except: upKey)
+                                        isDisabled: isComposeOperationBlocked(except: upKey),
+                                        help: language.resolved == .zhHans ? "启动项目" : "Start project"
                                     ) {
                                         runComposeOperation(.up, project: project)
                                     }
@@ -363,11 +375,14 @@ struct ComposeView: View {
                                         systemImage: "stop.fill",
                                         tint: CDTheme.ember,
                                         isLoading: activeComposeOperationKey == downKey,
-                                        isDisabled: isComposeOperationBlocked(except: downKey)
+                                        isDisabled: isComposeOperationBlocked(except: downKey),
+                                        help: language.resolved == .zhHans ? "停止项目" : "Stop project"
                                     ) {
                                         runComposeOperation(.down, project: project)
                                     }
-                                    DestructiveRowActionButton {
+                                    DestructiveRowActionButton(
+                                        help: language.resolved == .zhHans ? "移除项目" : "Remove project"
+                                    ) {
                                         pendingRemove = project
                                     }
                                 }
@@ -706,6 +721,7 @@ private struct ComposeProjectOverview: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(projectMatchedContainerCount == 0 || observationStore.isLoading)
+                        .help(language.resolved == .zhHans ? "读取项目日志和资源 Stats" : "Load project logs and resource stats")
                     }
                 }
             }
@@ -750,25 +766,29 @@ private struct ComposeProjectOverview: View {
                                 RowActionButton(
                                     systemImage: "hammer",
                                     isLoading: activeOperationKey == buildKey,
-                                    isDisabled: isOperationBlocked(except: buildKey)
+                                    isDisabled: isOperationBlocked(except: buildKey),
+                                    help: language.resolved == .zhHans ? "构建服务镜像" : "Build service image"
                                 ) { onBuildService(service) }
                                 RowActionButton(
                                     systemImage: "arrow.triangle.2.circlepath",
                                     tint: CDTheme.violet,
                                     isLoading: activeOperationKey == rebuildKey,
-                                    isDisabled: isOperationBlocked(except: rebuildKey)
+                                    isDisabled: isOperationBlocked(except: rebuildKey),
+                                    help: language.resolved == .zhHans ? "重新构建并启动服务" : "Rebuild and start service"
                                 ) { onRebuildService(service) }
                                 RowActionButton(
                                     systemImage: "play.fill",
                                     tint: CDTheme.lime,
                                     isLoading: activeOperationKey == upKey,
-                                    isDisabled: isOperationBlocked(except: upKey)
+                                    isDisabled: isOperationBlocked(except: upKey),
+                                    help: language.resolved == .zhHans ? "启动服务" : "Start service"
                                 ) { onUpService(service) }
                                 RowActionButton(
                                     systemImage: "stop.fill",
                                     tint: CDTheme.ember,
                                     isLoading: activeOperationKey == downKey,
-                                    isDisabled: isOperationBlocked(except: downKey)
+                                    isDisabled: isOperationBlocked(except: downKey),
+                                    help: language.resolved == .zhHans ? "停止服务" : "Stop service"
                                 ) { onDownService(service) }
                             }
                             DetailInfoRow(title: language.t(.image), value: service.image ?? service.buildContext ?? "—")

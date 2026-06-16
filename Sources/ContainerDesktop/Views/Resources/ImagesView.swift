@@ -10,9 +10,8 @@ struct ImagesView: View {
     @State private var pullReference = "alpine:latest"
     @State private var useCustomPullReference = false
     @State private var customPullReference = ""
-    @State private var selectedReference: String?
+    @State private var detailReference: String?
     @State private var pendingDelete: ImageSummary?
-    @State private var drawerMode: DetailDrawerMode = .overview
     @State private var showPullPopover = false
     @State private var showBuildPopover = false
     @State private var showTagPopover = false
@@ -62,9 +61,9 @@ struct ImagesView: View {
         }
     }
 
-    private var selectedImage: ImageSummary? {
-        guard let selectedReference else { return nil }
-        return runtimeStore.images.first { $0.reference == selectedReference }
+    private var detailImage: ImageSummary? {
+        guard let detailReference else { return nil }
+        return runtimeStore.images.first { $0.reference == detailReference }
     }
 
     private var pullChoices: [String] {
@@ -76,32 +75,32 @@ struct ImagesView: View {
     }
 
     var body: some View {
-        DrawerPageLayout(
-            isDrawerPresented: selectedImage != nil || showTasksDrawer,
-            onDismiss: closeDrawer,
-            drawerWidth: showTasksDrawer ? 620 : 430
-        ) {
-            pageContent
-        } drawer: {
-            if showTasksDrawer {
-                ImageTasksDrawer(
+        Group {
+            if let detailImage {
+                ImageDetailPage(
+                    runtimeStore: runtimeStore,
                     operationStore: operationStore,
-                    statusMessage: runtimeStore.imageOperationStatusMessage,
-                    statusIsError: runtimeStore.imageOperationStatusIsError,
-                    onClose: closeDrawer
+                    reference: detailImage.reference,
+                    isPresented: Binding(
+                        get: { detailReference != nil },
+                        set: { if !$0 { closeDetail() } }
+                    ),
+                    showTasksDrawer: $showTasksDrawer
                 )
-            } else if let selectedImage {
-                DetailDrawer(
-                    mode: $drawerMode,
-                    title: selectedImage.reference,
-                    subtitle: "container image inspect",
-                    systemImage: "photo.stack",
-                    rawText: runtimeStore.selectedInspectorText,
-                    onClose: {
-                        closeDrawer()
-                    }
+            } else {
+                DrawerPageLayout(
+                    isDrawerPresented: showTasksDrawer,
+                    onDismiss: closeTasksDrawer,
+                    drawerWidth: 620
                 ) {
-                    ImageDetailOverview(image: selectedImage)
+                    pageContent
+                } drawer: {
+                    ImageTasksDrawer(
+                        operationStore: operationStore,
+                        statusMessage: runtimeStore.imageOperationStatusMessage,
+                        statusIsError: runtimeStore.imageOperationStatusIsError,
+                        onClose: closeTasksDrawer
+                    )
                 }
             }
         }
@@ -144,6 +143,7 @@ struct ImagesView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
+                    .help(language.resolved == .zhHans ? "拉取镜像" : "Pull image")
 
                     Menu {
                         Button {
@@ -171,12 +171,14 @@ struct ImagesView: View {
                         Label(language.resolved == .zhHans ? "更多" : "More", systemImage: "ellipsis.circle")
                     }
                     .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
+                    .help(language.resolved == .zhHans ? "更多镜像操作" : "More image actions")
 
                     Button {
                         openTasksDrawer()
                     } label: {
                         Label(language.resolved == .zhHans ? "镜像任务" : "Image Tasks", systemImage: "clock.arrow.circlepath")
                     }
+                    .help(language.resolved == .zhHans ? "打开镜像任务列表" : "Open image tasks")
                 }
             }
 
@@ -206,35 +208,47 @@ struct ImagesView: View {
                     imageHeader
                 } rows: {
                     ForEach(filteredImages) { image in
-                        ResourceTableRow(isSelected: selectedReference == image.reference) {
+                        ResourceTableRow(isSelected: detailReference == image.reference) {
                             let deleteKey = RuntimeOperationKey.imageDelete(image.reference)
                             let isOperationBlocked = runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning
                             ResourceStatusDot(tint: image.variants.isEmpty ? .secondary : CDTheme.lime, isHollow: image.variants.isEmpty)
 
-                            Text(image.reference)
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button {
+                                selectImage(image)
+                            } label: {
+                                HStack(spacing: 0) {
+                                    Text(image.reference)
+                                        .font(.callout.weight(.medium))
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Text(image.tag)
-                                .font(.callout)
-                                .lineLimit(1)
-                                .frame(width: 120, alignment: .leading)
+                                    Text(image.tag)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                        .frame(width: 120, alignment: .leading)
 
-                            Text(String(image.id.prefix(12)))
-                                .font(.callout.monospaced())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 130, alignment: .leading)
+                                    Text(String(image.id.prefix(12)))
+                                        .font(.callout.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 130, alignment: .leading)
 
-                            Text(image.createdText)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 130, alignment: .leading)
+                                    Text(image.createdText)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 130, alignment: .leading)
 
-                            Text(image.sizeDisplay)
-                                .frame(width: 86, alignment: .trailing)
+                                    Text(image.sizeDisplay)
+                                        .frame(width: 86, alignment: .trailing)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(language.resolved == .zhHans ? "打开镜像详情" : "Open image details")
 
                             HStack(spacing: 8) {
-                                RowActionButton(systemImage: "sidebar.right") {
+                                RowActionButton(
+                                    systemImage: "sidebar.right",
+                                    help: language.resolved == .zhHans ? "打开镜像详情" : "Open image details"
+                                ) {
                                     selectImage(image)
                                 }
                                 ImageRowMoreMenu(isDisabled: isOperationBlocked) {
@@ -249,7 +263,8 @@ struct ImagesView: View {
                                 }
                                 DestructiveRowActionButton(
                                     isLoading: runtimeStore.isOperationActive(deleteKey),
-                                    isDisabled: isOperationBlocked && !runtimeStore.isOperationActive(deleteKey)
+                                    isDisabled: isOperationBlocked && !runtimeStore.isOperationActive(deleteKey),
+                                    help: language.resolved == .zhHans ? "删除镜像" : "Delete image"
                                 ) {
                                     pendingDelete = image
                                 }
@@ -282,18 +297,19 @@ struct ImagesView: View {
 
     private func selectImage(_ image: ImageSummary) {
         showTasksDrawer = false
-        selectedReference = image.reference
-        drawerMode = .overview
-        Task { await runtimeStore.inspectImage(image.reference) }
+        detailReference = image.reference
     }
 
     private func openTasksDrawer() {
-        selectedReference = nil
         showTasksDrawer = true
     }
 
-    private func closeDrawer() {
-        selectedReference = nil
+    private func closeDetail() {
+        detailReference = nil
+        showTasksDrawer = false
+    }
+
+    private func closeTasksDrawer() {
         showTasksDrawer = false
     }
 
@@ -344,11 +360,13 @@ struct ImagesView: View {
                     showPullPopover = false
                 }
                 .disabled(runtimeStore.isImageOperationRunning)
+                .help(language.resolved == .zhHans ? "取消拉取镜像" : "Cancel image pull")
                 Button(language.t(.pull)) {
                     runPullImage()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(currentPullReference.trimmed.isEmpty || runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
+                .help(language.resolved == .zhHans ? "拉取当前镜像引用" : "Pull the current image reference")
             }
         }
         .padding(16)
@@ -367,6 +385,7 @@ struct ImagesView: View {
                 } label: {
                     Image(systemName: "folder")
                 }
+                .help(language.resolved == .zhHans ? "选择构建目录" : "Choose build context")
             }
             TextField("Dockerfile / Containerfile", text: $buildDockerfilePath)
                 .textFieldStyle(.roundedBorder)
@@ -434,6 +453,7 @@ struct ImagesView: View {
                 Button("取消") {
                     showBuildPopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消构建镜像" : "Cancel image build")
                 Button(language.t(.build)) {
                     showBuildPopover = false
                     let options = ImageBuildOptions(
@@ -469,6 +489,7 @@ struct ImagesView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(runtimeStore.isImageOperationRunning)
+                .help(language.resolved == .zhHans ? "开始构建镜像" : "Start building image")
             }
         }
         .padding(16)
@@ -486,6 +507,7 @@ struct ImagesView: View {
             HStack {
                 Spacer()
                 Button("取消") { showTagPopover = false }
+                    .help(language.resolved == .zhHans ? "取消标记镜像" : "Cancel image tag")
                 Button(language.resolved == .zhHans ? "标记" : "Tag") {
                     showTagPopover = false
                     runTrackedImageOperation(
@@ -497,6 +519,7 @@ struct ImagesView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .help(language.resolved == .zhHans ? "创建镜像标签" : "Create image tag")
             }
         }
         .padding(16)
@@ -521,6 +544,7 @@ struct ImagesView: View {
             HStack {
                 Spacer()
                 Button("取消") { showPushPopover = false }
+                    .help(language.resolved == .zhHans ? "取消推送镜像" : "Cancel image push")
                 Button(language.resolved == .zhHans ? "推送" : "Push") {
                     showPushPopover = false
                     let options = ImagePushOptions(
@@ -538,6 +562,7 @@ struct ImagesView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .help(language.resolved == .zhHans ? "推送镜像到仓库" : "Push image to registry")
             }
         }
         .padding(16)
@@ -559,6 +584,7 @@ struct ImagesView: View {
                 } label: {
                     Image(systemName: "folder")
                 }
+                .help(language.resolved == .zhHans ? "选择导出路径" : "Choose export path")
             }
             HStack(spacing: 8) {
                 TextField("platform", text: $savePlatform)
@@ -574,11 +600,13 @@ struct ImagesView: View {
                 Button("取消") {
                     showSavePopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消导出镜像" : "Cancel image export")
                 Button(language.resolved == .zhHans ? "导出" : "Save") {
                     runSaveImages()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(lines(from: saveReferencesText).isEmpty || saveOutputPath.trimmed.isEmpty || runtimeStore.isImageOperationRunning)
+                .help(language.resolved == .zhHans ? "导出镜像归档" : "Export image archive")
             }
         }
         .padding(16)
@@ -597,6 +625,7 @@ struct ImagesView: View {
                 } label: {
                     Image(systemName: "folder")
                 }
+                .help(language.resolved == .zhHans ? "选择导入文件" : "Choose import file")
             }
             Toggle(language.resolved == .zhHans ? "-f / 强制导入" : "-f / Force", isOn: $loadForce)
                 .toggleStyle(.checkbox)
@@ -608,11 +637,13 @@ struct ImagesView: View {
                 Button("取消") {
                     showLoadPopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消导入镜像" : "Cancel image import")
                 Button(language.resolved == .zhHans ? "导入" : "Load") {
                     runLoadImage()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(loadInputPath.trimmed.isEmpty || runtimeStore.isImageOperationRunning)
+                .help(language.resolved == .zhHans ? "导入镜像归档" : "Import image archive")
             }
         }
         .padding(16)
@@ -795,42 +826,6 @@ struct ImagesView: View {
     }
 }
 
-private struct ImageDetailOverview: View {
-    @Environment(\.appLanguage) private var language
-    var image: ImageSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            DetailSection(title: language.resolved == .zhHans ? "镜像" : "Image") {
-                DetailInfoCard {
-                    DetailInfoRow(title: language.t(.name), value: image.reference)
-                    DetailInfoRow(title: language.t(.tag), value: image.tag)
-                    DetailInfoRow(title: language.t(.imageID), value: String(image.id.prefix(18)), monospaced: true)
-                    DetailInfoRow(title: "Digest", value: image.digest, monospaced: true)
-                    DetailInfoRow(title: language.t(.created), value: image.createdText)
-                    DetailInfoRow(title: language.t(.size), value: image.sizeDisplay)
-                }
-            }
-
-            DetailSection(title: "Variants") {
-                DetailInfoCard {
-                    if image.variants.isEmpty {
-                        Text(language.resolved == .zhHans ? "没有平台变体信息。" : "No platform variants.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(image.variants, id: \.digest) { variant in
-                            DetailInfoRow(
-                                title: "\(variant.platform.os)/\(variant.platform.architecture)",
-                                value: ByteCountFormatter.string(fromByteCount: variant.size, countStyle: .file)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 private struct ImageRowMoreMenu: View {
     @Environment(\.appLanguage) private var language
     var isDisabled: Bool
@@ -864,5 +859,6 @@ private struct ImageRowMoreMenu: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .help(language.resolved == .zhHans ? "更多镜像操作" : "More image actions")
     }
 }

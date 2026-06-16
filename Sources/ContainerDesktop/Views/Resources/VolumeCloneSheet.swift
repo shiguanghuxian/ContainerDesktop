@@ -48,9 +48,11 @@ struct VolumeCloneSheet: View {
             HStack {
                 Spacer()
                 Button(language.resolved == .zhHans ? "取消" : "Cancel", action: onCancel)
+                    .help(language.resolved == .zhHans ? "取消克隆卷" : "Cancel volume clone")
                 Button(language.resolved == .zhHans ? "克隆" : "Clone", action: onClone)
                     .buttonStyle(.borderedProminent)
                     .disabled(isRunning || name.trimmed.isEmpty)
+                    .help(language.resolved == .zhHans ? "克隆存储卷" : "Clone volume")
             }
         }
         .padding(20)

@@ -15,7 +15,7 @@ enum RegistryBrowserError: LocalizedError, Sendable {
         case .emptyRepository:
             return "仓库名称不能为空。"
         case .authenticationRequired:
-            return "Registry 需要认证，请填写用户名和密码或 Token 后重试。"
+            return "Registry 需要认证，请先在 Registries 页面登录当前仓库，并确认 server 名称一致，或允许钥匙串访问后重试。"
         }
     }
 }
@@ -80,16 +80,12 @@ struct RegistryBrowserClient: Sendable {
         let trimmedRepository = repository.trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !trimmedServer.isEmpty, !trimmedRepository.isEmpty else { throw RegistryBrowserError.emptyRepository }
 
-        var components = URLComponents()
-        components.scheme = scheme.nilIfBlank ?? "https"
-        components.host = trimmedServer
-        components.path = "/v2/\(trimmedRepository)/tags/list"
         var queryItems = [URLQueryItem(name: "n", value: "\(limit)")]
         if let last = last?.nilIfBlank {
             queryItems.append(URLQueryItem(name: "last", value: last))
         }
-        components.queryItems = queryItems
-        guard let url = components.url else { throw RegistryBrowserError.invalidURL }
+        let endpoint = try RegistryServerEndpoint.resolve(server: trimmedServer, fallbackScheme: scheme)
+        let url = try endpoint.url(path: "/v2/\(trimmedRepository)/tags/list", queryItems: queryItems)
         let result = try await fetchRegistryTags(
             from: url,
             repository: trimmedRepository,
@@ -98,7 +94,7 @@ struct RegistryBrowserClient: Sendable {
         let items = (result.response.tags ?? []).sorted().map {
             RegistryImageTag(name: $0, size: nil, updatedAt: nil, digest: nil, mediaType: nil, platforms: [])
         }
-        let nextCursor = result.hasNext ? items.last?.name : nil
+        let nextCursor = result.nextCursor ?? (result.hasNext ? items.last?.name : nil)
         return RegistryPage(
             items: items,
             totalCount: nil,
@@ -122,11 +118,8 @@ struct RegistryBrowserClient: Sendable {
             throw RegistryBrowserError.emptyRepository
         }
 
-        var components = URLComponents()
-        components.scheme = scheme.nilIfBlank ?? "https"
-        components.host = trimmedServer
-        components.path = "/v2/\(trimmedRepository)/manifests/\(trimmedReference)"
-        guard let url = components.url else { throw RegistryBrowserError.invalidURL }
+        let endpoint = try RegistryServerEndpoint.resolve(server: trimmedServer, fallbackScheme: scheme)
+        let url = try endpoint.url(path: "/v2/\(trimmedRepository)/manifests/\(trimmedReference)")
 
         let result = try await fetchRegistryResource(
             from: url,
@@ -154,14 +147,14 @@ struct RegistryBrowserClient: Sendable {
         from url: URL,
         repository: String,
         credentials: RegistryBrowseCredentials?
-    ) async throws -> (response: RegistryTagsResponse, hasNext: Bool) {
+    ) async throws -> (response: RegistryTagsResponse, hasNext: Bool, nextCursor: String?) {
         let result = try await fetchRegistryResource(
             from: url,
             repository: repository,
             credentials: credentials
         )
         let decoded = try JSONDecoder.containerDesktop.decode(RegistryTagsResponse.self, from: result.data)
-        return (decoded, result.response?.value(forHTTPHeaderField: "Link") != nil)
+        return (decoded, hasNextLink(result.response), nextCursor(from: result.response, fallback: nil))
     }
 
     private func fetchRegistryResource(
@@ -235,6 +228,42 @@ struct RegistryBrowserClient: Sendable {
         queryItems.append(URLQueryItem(name: "scope", value: scope))
         components.queryItems = queryItems
         return components.url
+    }
+
+    private func hasNextLink(_ response: HTTPURLResponse?) -> Bool {
+        guard let link = response?.value(forHTTPHeaderField: "Link") else { return false }
+        return link.range(of: #"rel="next""#, options: .caseInsensitive) != nil
+            || link.range(of: "rel=next", options: .caseInsensitive) != nil
+    }
+
+    private func nextCursor(from response: HTTPURLResponse?, fallback: String?) -> String? {
+        guard hasNextLink(response),
+              let link = response?.value(forHTTPHeaderField: "Link") else {
+            return nil
+        }
+
+        let candidates = link
+            .split(separator: ",")
+            .map(String.init)
+            .filter {
+                $0.range(of: #"rel="next""#, options: .caseInsensitive) != nil
+                    || $0.range(of: "rel=next", options: .caseInsensitive) != nil
+            }
+
+        for candidate in candidates {
+            guard let start = candidate.firstIndex(of: "<"),
+                  let end = candidate[start...].firstIndex(of: ">") else {
+                continue
+            }
+            let rawURL = String(candidate[candidate.index(after: start)..<end])
+            guard let components = URLComponents(string: rawURL),
+                  let last = components.queryItems?.first(where: { $0.name == "last" })?.value?.nilIfBlank else {
+                continue
+            }
+            return last
+        }
+
+        return fallback
     }
 
     private func parseAuthenticateParameters(_ challenge: String) -> [String: String] {

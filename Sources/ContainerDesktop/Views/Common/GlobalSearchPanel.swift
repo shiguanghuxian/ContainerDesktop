@@ -71,6 +71,7 @@ struct GlobalSearchPanel: View {
                         .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
+                    .help(language.resolved == .zhHans ? "打开 \(result.title)" : "Open \(result.title)")
                 }
             }
         }

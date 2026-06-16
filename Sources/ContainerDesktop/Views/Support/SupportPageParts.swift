@@ -61,6 +61,7 @@ struct SupportStepRow: View {
 }
 
 struct SupportCommandRow: View {
+    @Environment(\.appLanguage) private var language
     var title: String
     var command: String
     var onCopy: () -> Void
@@ -84,7 +85,7 @@ struct SupportCommandRow: View {
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.borderless)
-            .help("Copy")
+            .help(language.resolved == .zhHans ? "复制命令" : "Copy command")
         }
         .padding(10)
         .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))

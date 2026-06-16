@@ -67,12 +67,12 @@ struct ComposeServiceRuntimeMenu: View {
                         .controlSize(.small)
                 } else {
                     Image(systemName: "shippingbox")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(CDTheme.dockerBlue)
                 }
             }
-            .frame(width: 28, height: 28)
-            .background(CDTheme.dockerBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            .frame(width: 24, height: 24)
+            .background(CDTheme.dockerBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)

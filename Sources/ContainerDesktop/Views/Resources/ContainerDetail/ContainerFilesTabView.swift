@@ -203,12 +203,14 @@ struct ContainerFilesTabView: View {
             } label: {
                 Label(language.resolved == .zhHans ? "新建目录" : "New Folder", systemImage: "folder.badge.plus")
             }
+            .help(language.resolved == .zhHans ? "新建目录" : "Create folder")
 
             Button {
                 upload()
             } label: {
                 Label(language.resolved == .zhHans ? "上传" : "Upload", systemImage: "square.and.arrow.up")
             }
+            .help(language.resolved == .zhHans ? "上传文件" : "Upload file")
         }
         .fixedSize()
     }
@@ -395,6 +397,7 @@ struct ContainerFilesTabView: View {
                     Label(language.t(.save), systemImage: "square.and.arrow.down")
                 }
                 .disabled(store.selectedFile == nil || store.selectedFile?.isDirectory == true || store.isFileSaving)
+                .help(language.resolved == .zhHans ? "保存文件修改" : "Save file changes")
             }
 
             TextEditor(text: $store.filePreviewText)
@@ -456,6 +459,7 @@ struct ContainerFilesTabView: View {
 }
 
 private struct DirectoryBreadcrumb: View {
+    @Environment(\.appLanguage) private var language
     var path: String
     var onSelect: (String) -> Void
 
@@ -479,6 +483,7 @@ private struct DirectoryBreadcrumb: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(index == parts.count - 1 ? .primary : CDTheme.dockerBlue)
+                    .help(language.resolved == .zhHans ? "打开路径" : "Open path")
 
                     if index < parts.count - 1 {
                         Image(systemName: "chevron.right")

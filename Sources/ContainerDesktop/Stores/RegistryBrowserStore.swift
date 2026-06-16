@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class RegistryBrowserStore {
     private let client: RegistryBrowserClient
+    private let credentialResolver: RegistryCredentialResolving
 
     var searchQuery = "nginx"
     var repositories: [RegistryRepositoryResult] = []
@@ -20,10 +21,9 @@ final class RegistryBrowserStore {
     var customRegistryServer = "registry-1.docker.io"
     var customRepository = ""
     var customRegistryScheme = "https"
-    var customRegistryUsername = ""
-    var customRegistryPassword = ""
     var customRegistryTags: [RegistryImageTag] = []
     var selectedCustomRegistryTag: RegistryImageTag?
+    var customRegistryRepositoryResult: RegistryV2RepositoryResult?
     var customRegistryCursorStack: [String] = []
     var customRegistryNextCursor: String?
     var isSearching = false
@@ -31,8 +31,12 @@ final class RegistryBrowserStore {
     var isLoadingCustomTagDetails = false
     var errorMessage: String?
 
-    init(client: RegistryBrowserClient = RegistryBrowserClient()) {
+    init(
+        client: RegistryBrowserClient = RegistryBrowserClient(),
+        credentialResolver: RegistryCredentialResolving = RegistryKeychainCredentialResolver()
+    ) {
         self.client = client
+        self.credentialResolver = credentialResolver
     }
 
     func searchDockerHub(page: Int = 1) async {
@@ -56,6 +60,67 @@ final class RegistryBrowserStore {
         } catch {
             repositories = []
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func resetDockerHubSearch() {
+        repositories = []
+        selectedRepository = nil
+        selectedTag = nil
+        tags = []
+        repositoryPage = 1
+        repositoryTotalCount = nil
+        repositoryHasNext = false
+        tagPage = 1
+        tagTotalCount = nil
+        tagHasNext = false
+        errorMessage = nil
+    }
+
+    func resetRegistryV2State() {
+        resetCustomRegistryTags()
+        errorMessage = nil
+    }
+
+    func resetCustomRegistryTags() {
+        customRegistryTags = []
+        selectedCustomRegistryTag = nil
+        customRegistryRepositoryResult = nil
+        customRegistryCursorStack = []
+        customRegistryNextCursor = nil
+    }
+
+    func searchCustomRepository() async {
+        let server = customRegistryServer.trimmed
+        let repository = customRepository.trimmed
+        guard !server.isEmpty, !repository.isEmpty else { return }
+        isLoadingTags = true
+        errorMessage = nil
+        resetCustomRegistryTags()
+        defer { isLoadingTags = false }
+
+        let resolved = await resolvedCredentials(for: server)
+        do {
+            let page = try await client.registryTags(
+                server: server,
+                repository: repository,
+                scheme: customRegistryScheme,
+                credentials: resolved.credentials
+            )
+            customRegistryTags = page.items
+            customRegistryRepositoryResult = RegistryV2RepositoryResult(
+                server: server,
+                repository: repository,
+                tagCount: page.items.count,
+                hasNextPage: page.hasNext
+            )
+            customRegistryNextCursor = page.nextCursor
+        } catch {
+            if let credentialMessage = resolved.errorMessage {
+                errorMessage = "\(credentialMessage)\n\(error.localizedDescription)"
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -87,22 +152,31 @@ final class RegistryBrowserStore {
         errorMessage = nil
         customRegistryTags = []
         selectedCustomRegistryTag = nil
+        customRegistryRepositoryResult = RegistryV2RepositoryResult(
+            server: server,
+            repository: repository,
+            tagCount: 0,
+            hasNextPage: false
+        )
         defer { isLoadingTags = false }
 
+        let resolved = await resolvedCredentials(for: server)
         do {
-            let credentials = RegistryBrowseCredentials(
-                username: customRegistryUsername,
-                password: customRegistryPassword
-            )
             let page = try await client.registryTags(
                 server: server,
                 repository: repository,
                 scheme: customRegistryScheme,
-                credentials: credentials.isUsable ? credentials : nil,
+                credentials: resolved.credentials,
                 last: last
             )
             customRegistryTags = page.items
             selectedCustomRegistryTag = customRegistryTags.first
+            customRegistryRepositoryResult = RegistryV2RepositoryResult(
+                server: server,
+                repository: repository,
+                tagCount: page.items.count,
+                hasNextPage: page.hasNext
+            )
             customRegistryNextCursor = page.nextCursor
             if movingForward, let last {
                 customRegistryCursorStack.append(last)
@@ -113,7 +187,11 @@ final class RegistryBrowserStore {
                 await loadCustomRegistryManifest(for: selectedCustomRegistryTag.name)
             }
         } catch {
-            errorMessage = error.localizedDescription
+            if let credentialMessage = resolved.errorMessage {
+                errorMessage = "\(credentialMessage)\n\(error.localizedDescription)"
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -130,17 +208,14 @@ final class RegistryBrowserStore {
         errorMessage = nil
         defer { isLoadingCustomTagDetails = false }
 
+        let resolved = await resolvedCredentials(for: server)
         do {
-            let credentials = RegistryBrowseCredentials(
-                username: customRegistryUsername,
-                password: customRegistryPassword
-            )
             let details = try await client.registryManifest(
                 server: server,
                 repository: repository,
                 reference: reference,
                 scheme: customRegistryScheme,
-                credentials: credentials.isUsable ? credentials : nil
+                credentials: resolved.credentials
             )
             guard let current = selectedCustomRegistryTag, current.name == reference else { return }
             let enriched = current.enriched(with: details)
@@ -149,7 +224,11 @@ final class RegistryBrowserStore {
                 customRegistryTags[index] = customRegistryTags[index].enriched(with: details)
             }
         } catch {
-            errorMessage = error.localizedDescription
+            if let credentialMessage = resolved.errorMessage {
+                errorMessage = "\(credentialMessage)\n\(error.localizedDescription)"
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -186,5 +265,13 @@ final class RegistryBrowserStore {
         _ = customRegistryCursorStack.popLast()
         let previous = customRegistryCursorStack.last
         await loadCustomRegistryTags(last: previous)
+    }
+
+    private func resolvedCredentials(for server: String) async -> (credentials: RegistryBrowseCredentials?, errorMessage: String?) {
+        do {
+            return (try await credentialResolver.credentials(for: server, scheme: customRegistryScheme), nil)
+        } catch {
+            return (nil, error.localizedDescription)
+        }
     }
 }

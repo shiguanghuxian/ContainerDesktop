@@ -8,6 +8,7 @@ struct MachineDetailPage: View {
 
     @State private var detailStore: MachineDetailStore
     @State private var isConfirmingDelete = false
+    @State private var isEditingConfig = false
 
     init(runtimeStore: RuntimeStore, machineID: String, isPresented: Binding<Bool>) {
         self.runtimeStore = runtimeStore
@@ -28,9 +29,11 @@ struct MachineDetailPage: View {
                         MachineDetailHeaderView(
                             machine: machine,
                             inspection: detailStore.inspection,
+                            isConfigSaving: runtimeStore.isOperationActive(RuntimeOperationKey.machineConfig(machine.id)),
                             onBack: { closeDetail() },
                             onStartStop: { startStop(machine) },
                             onSetDefault: { setDefault(machine) },
+                            onEditConfig: { isEditingConfig = true },
                             onDelete: { isConfirmingDelete = true }
                         )
 
@@ -45,6 +48,18 @@ struct MachineDetailPage: View {
                 }
                 .onDisappear {
                     detailStore.stopAll()
+                }
+                .sheet(isPresented: $isEditingConfig) {
+                    MachineConfigEditSheet(
+                        runtimeStore: runtimeStore,
+                        machine: machine,
+                        inspection: detailStore.inspection,
+                        onWillRestart: {
+                            detailStore.stopAll()
+                        }
+                    ) {
+                        await detailStore.refreshInspect()
+                    }
                 }
                 .alert("删除 Machine？", isPresented: $isConfirmingDelete) {
                     Button(language.t(.delete), role: .destructive) {
@@ -84,7 +99,7 @@ struct MachineDetailPage: View {
                 await detailStore.refreshInspect()
             }
         case .settings:
-            MachineSettingsTabView(store: detailStore, machine: machine) {
+            MachineSettingsTabView(runtimeStore: runtimeStore, store: detailStore, machine: machine) {
                 await runtimeStore.refreshAll()
             }
         }

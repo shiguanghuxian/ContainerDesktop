@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ContainersView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
+    @Bindable var statsHistoryStore: ContainerStatsHistoryStore
     @State private var searchText = ""
     @State private var onlyRunning = false
     @State private var showRunPopover = false
@@ -97,6 +98,7 @@ struct ContainersView: View {
             if let container = detailContainer {
                 ContainerDetailPage(
                     runtimeStore: runtimeStore,
+                    statsHistoryStore: statsHistoryStore,
                     containerID: detailID ?? container.id,
                     isPresented: Binding(
                         get: { detailID != nil },
@@ -163,6 +165,7 @@ struct ContainersView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(runtimeStore.activeOperationKey != nil)
+                    .help(language.resolved == .zhHans ? "打开运行容器表单" : "Open the run container form")
                     .sheet(isPresented: $showRunPopover) {
                         runContainerForm
                     }
@@ -172,6 +175,7 @@ struct ContainersView: View {
                     } label: {
                         Label(language.t(.refresh), systemImage: "arrow.clockwise")
                     }
+                    .help(language.resolved == .zhHans ? "刷新容器列表" : "Refresh containers")
                 }
             }
 
@@ -225,6 +229,7 @@ struct ContainersView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .help(language.resolved == .zhHans ? "打开容器详情" : "Open container details")
 
                             HStack(spacing: 8) {
                                 let startStopKey = container.state == "running"
@@ -233,7 +238,10 @@ struct ContainersView: View {
                                 RowActionButton(
                                     systemImage: container.state == "running" ? "stop.fill" : "play.fill",
                                     isLoading: runtimeStore.isOperationActive(startStopKey),
-                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(startStopKey)
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(startStopKey),
+                                    help: container.state == "running"
+                                        ? (language.resolved == .zhHans ? "停止容器" : "Stop container")
+                                        : (language.resolved == .zhHans ? "启动容器" : "Start container")
                                 ) {
                                     Task {
                                         if container.state == "running" {
@@ -243,7 +251,11 @@ struct ContainersView: View {
                                         }
                                     }
                                 }
-                                RowActionButton(systemImage: "terminal", tint: container.state == "running" ? CDTheme.dockerBlue : .secondary) {
+                                RowActionButton(
+                                    systemImage: "terminal",
+                                    tint: container.state == "running" ? CDTheme.dockerBlue : .secondary,
+                                    help: language.resolved == .zhHans ? "打开容器终端" : "Open container terminal"
+                                ) {
                                     openContainerTerminal(container)
                                 }
                                 RowActionButton(
@@ -255,13 +267,17 @@ struct ContainersView: View {
                                 ) {
                                     exportContainer(container)
                                 }
-                                RowActionButton(systemImage: "sidebar.right") {
+                                RowActionButton(
+                                    systemImage: "sidebar.right",
+                                    help: language.resolved == .zhHans ? "打开容器概览抽屉" : "Open container overview drawer"
+                                ) {
                                     openContainerDrawer(container)
                                 }
                                 let deleteKey = RuntimeOperationKey.containerDelete(container.id)
                                 DestructiveRowActionButton(
                                     isLoading: runtimeStore.isOperationActive(deleteKey),
-                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey)
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey),
+                                    help: language.resolved == .zhHans ? "删除容器" : "Delete container"
                                 ) {
                                     pendingDelete = container
                                 }
@@ -452,10 +468,14 @@ struct ContainersView: View {
                 Button("取消") {
                     showRunPopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消运行容器" : "Cancel run container")
                 Button(newContainerCreateOnly ? (language.resolved == .zhHans ? "创建" : "Create") : (language.resolved == .zhHans ? "运行" : "Run")) {
                     submitContainerRun()
                 }
                 .buttonStyle(.borderedProminent)
+                .help(newContainerCreateOnly
+                    ? (language.resolved == .zhHans ? "只创建容器" : "Create container only")
+                    : (language.resolved == .zhHans ? "运行容器" : "Run container"))
             }
             .padding(16)
         }

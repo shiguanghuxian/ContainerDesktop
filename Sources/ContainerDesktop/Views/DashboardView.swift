@@ -50,11 +50,12 @@ struct DashboardView: View {
                         tint: runtimeStore.environment.systemRunning ? .green : .orange
                     )
                     Button {
-                        Task { await runtimeStore.refreshAll() }
+                        refreshDashboard()
                     } label: {
                         Label(language.t(.refresh), systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.borderedProminent)
+                    .help(language.resolved == .zhHans ? "刷新 Dashboard 数据" : "Refresh dashboard data")
                 }
             }
 
@@ -104,6 +105,13 @@ struct DashboardView: View {
                     tint: CDTheme.ember
                 )
             }
+
+            EnvironmentResourceMonitorPanel(
+                snapshot: runtimeStore.resourceMonitorSnapshot,
+                hostProcesses: runtimeStore.hostProcessSnapshots,
+                errorMessage: runtimeStore.resourceMonitorErrorMessage,
+                compact: true
+            )
 
             if let diskUsage = runtimeStore.diskUsage {
                 CompactDiskUsagePanel(diskUsage: diskUsage)
@@ -178,6 +186,20 @@ struct DashboardView: View {
                     }
                 }
             }
+        }
+        .task(id: runtimeStore.isReady) {
+            guard runtimeStore.isReady else { return }
+            runtimeStore.startResourceMonitoring(interval: 2)
+        }
+        .onDisappear {
+            runtimeStore.stopResourceMonitoring()
+        }
+    }
+
+    private func refreshDashboard() {
+        Task {
+            await runtimeStore.refreshAll()
+            await runtimeStore.refreshResourceMonitorOnce()
         }
     }
 }

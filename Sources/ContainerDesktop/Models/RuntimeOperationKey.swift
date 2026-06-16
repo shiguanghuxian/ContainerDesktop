@@ -38,6 +38,10 @@ enum RuntimeOperationKey {
         "machine:default:\(id)"
     }
 
+    static func machineConfig(_ id: String) -> String {
+        "machine:config:\(id)"
+    }
+
     static func imageDelete(_ reference: String) -> String {
         "image:delete:\(reference)"
     }

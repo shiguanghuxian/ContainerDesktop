@@ -33,12 +33,6 @@ final class MachineDetailStore {
     var terminalResetSequence = 0
     var terminalState: TerminalSessionState = .disconnected
 
-    var configCPUs = 4
-    var configMemory = ""
-    var homeMount = MachineHomeMountOption.rw
-    var configStatusText: String?
-    var configError: String?
-
     init(machineID: String, client: ContainerCLIClient = ContainerCLIClient()) {
         self.machineID = machineID
         self.client = client
@@ -76,7 +70,6 @@ final class MachineDetailStore {
             let result = try await client.inspectMachine(machineID)
             inspection = result.details.first
             inspectText = result.rawText
-            syncSettingsFromInspection()
         } catch {
             inspectError = error.localizedDescription
             inspectText = error.localizedDescription
@@ -178,40 +171,6 @@ final class MachineDetailStore {
 
     func stopAll() {
         stopTerminal()
-    }
-
-    func saveConfig() async {
-        let nextCPUs = String(configCPUs)
-        let nextMemory = configMemory.nilIfBlank
-        let nextHomeMount = homeMount.rawValue
-
-        configStatusText = nil
-        configError = nil
-
-        guard nextMemory != nil || inspection?.cpus != configCPUs || inspection?.homeMount != nextHomeMount else {
-            configError = "请至少修改一个配置项。"
-            return
-        }
-
-        do {
-            try await client.setMachineConfig(
-                id: machineID,
-                cpus: nextCPUs,
-                memory: nextMemory,
-                homeMount: nextHomeMount
-            )
-            configStatusText = "配置已保存，下次停启后生效。"
-            configMemory = ""
-            await refreshInspect()
-        } catch {
-            configError = error.localizedDescription
-        }
-    }
-
-    private func syncSettingsFromInspection() {
-        guard let inspection else { return }
-        configCPUs = inspection.cpus
-        homeMount = MachineHomeMountOption(rawValue: inspection.homeMount) ?? .rw
     }
 
     private func resetTerminalOutput() {

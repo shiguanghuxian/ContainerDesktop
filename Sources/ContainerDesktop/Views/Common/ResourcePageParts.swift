@@ -139,6 +139,7 @@ struct DestructiveRowActionButton: View {
     var systemImage: String = "trash"
     var isLoading = false
     var isDisabled = false
+    var help: String?
     var action: () -> Void
 
     var body: some View {
@@ -147,6 +148,7 @@ struct DestructiveRowActionButton: View {
             tint: .red,
             isLoading: isLoading,
             isDisabled: isDisabled,
+            help: help,
             action: action
         )
     }

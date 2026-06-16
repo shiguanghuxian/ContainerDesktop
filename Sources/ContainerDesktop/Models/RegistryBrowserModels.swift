@@ -5,6 +5,70 @@ enum RegistryTagDetailSource: String, Hashable, Sendable {
     case registryV2
 }
 
+enum RegistryBrowserContext: Hashable, Sendable {
+    case dockerHub
+    case registryV2(server: String)
+
+    var isDockerHub: Bool {
+        if case .dockerHub = self { return true }
+        return false
+    }
+
+    var registryServer: String? {
+        guard case .registryV2(let server) = self else { return nil }
+        return server
+    }
+
+    var displayName: String {
+        switch self {
+        case .dockerHub:
+            return "Docker Hub"
+        case .registryV2(let server):
+            return server
+        }
+    }
+
+    static func context(for registry: RegistrySummary) -> RegistryBrowserContext {
+        registry.isDockerHubRegistry ? .dockerHub : .registryV2(server: registry.registryBrowseServer)
+    }
+}
+
+enum RegistryLoginServerMode: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case preset
+    case custom
+
+    var id: String { rawValue }
+}
+
+struct RegistryLoginServerSelection: Hashable, Sendable {
+    var mode: RegistryLoginServerMode
+    var presetServer: String
+    var customServer: String
+
+    var resolvedServer: String {
+        Self.normalizedServer(mode == .custom ? customServer : presetServer)
+    }
+
+    var canSubmit: Bool {
+        !resolvedServer.isEmpty
+    }
+
+    static func normalizedServer(_ rawValue: String) -> String {
+        var value = rawValue.trimmed
+        let lowercased = value.lowercased()
+        if lowercased.hasPrefix("https://") {
+            value = String(value.dropFirst("https://".count))
+        } else if lowercased.hasPrefix("http://") {
+            value = String(value.dropFirst("http://".count))
+        }
+        value = value.trimmed
+        while value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value.trimmed
+    }
+}
+
 struct RegistryTagDetailSelection: Identifiable, Hashable, Sendable {
     var source: RegistryTagDetailSource
     var title: String
@@ -44,6 +108,70 @@ struct RegistryTagListSelection: Identifiable, Hashable, Sendable {
 
     func reference(for tag: RegistryImageTag) -> String {
         "\(pullReference):\(tag.name)"
+    }
+}
+
+struct RegistryV2RepositoryResult: Identifiable, Hashable, Sendable {
+    var server: String
+    var repository: String
+    var tagCount: Int
+    var hasNextPage: Bool
+
+    var id: String {
+        "\(server)/\(repository)"
+    }
+
+    var pullReference: String {
+        "\(server)/\(repository)"
+    }
+}
+
+struct RegistryServerEndpoint: Hashable, Sendable {
+    var scheme: String
+    var host: String
+    var port: Int?
+
+    var server: String {
+        if let port {
+            return "\(host):\(port)"
+        }
+        return host
+    }
+
+    static func resolve(server rawServer: String, fallbackScheme: String = "https") throws -> RegistryServerEndpoint {
+        let trimmedServer = rawServer.trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmedServer.isEmpty else { throw RegistryBrowserError.invalidURL }
+
+        let lowercased = trimmedServer.lowercased()
+        let source: String
+        if lowercased.hasPrefix("http://") || lowercased.hasPrefix("https://") {
+            source = trimmedServer
+        } else {
+            let scheme = fallbackScheme.nilIfBlank ?? "https"
+            source = "\(scheme)://\(trimmedServer)"
+        }
+
+        guard let components = URLComponents(string: source),
+              let host = components.host?.nilIfBlank else {
+            throw RegistryBrowserError.invalidURL
+        }
+
+        return RegistryServerEndpoint(
+            scheme: components.scheme?.nilIfBlank ?? fallbackScheme.nilIfBlank ?? "https",
+            host: host,
+            port: components.port
+        )
+    }
+
+    func url(path: String, queryItems: [URLQueryItem] = []) throws -> URL {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.port = port
+        components.path = path.hasPrefix("/") ? path : "/\(path)"
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else { throw RegistryBrowserError.invalidURL }
+        return url
     }
 }
 

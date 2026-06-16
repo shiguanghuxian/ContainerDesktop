@@ -18,8 +18,63 @@ struct MachineModelsTests {
         #expect(FormPresetOptions.machineImages.contains("alpine:3.22"))
         #expect(FormPresetOptions.machineImages.contains("alpine:3.21"))
         #expect(FormPresetOptions.machineImages.contains("alpine:3.20"))
+        #expect(FormPresetOptions.machineImages.contains("alpine:latest"))
+        #expect(FormPresetOptions.machineImages.contains("local/ubuntu-machine:latest"))
+        #expect(FormPresetOptions.machineImages.contains("local/debian-machine:latest"))
         #expect(!FormPresetOptions.machineImages.contains("nginx:latest"))
         #expect(!FormPresetOptions.machineImages.contains("redis:latest"))
+        #expect(!FormPresetOptions.machineImages.contains("ubuntu:24.04"))
+        #expect(!FormPresetOptions.machineImages.contains("debian:bookworm"))
+        #expect(FormPresetOptions.machineImagePreset(reference: "alpine:3.22")?.requiresLocalBuild == false)
+        #expect(FormPresetOptions.machineImagePreset(reference: "local/ubuntu-machine:latest")?.requiresLocalBuild == true)
+        #expect(FormPresetOptions.machineImagePreset(reference: " local/debian-machine:latest ")?.requiresLocalBuild == true)
+        #expect(FormPresetOptions.machineImagePreset(reference: "alpine:3.22")?.buildRecipe == nil)
+        #expect(FormPresetOptions.machineImagePreset(reference: "local/ubuntu-machine:latest")?.buildRecipe?.dockerfile.contains("FROM ubuntu:24.04") == true)
+        #expect(FormPresetOptions.machineImagePreset(reference: "local/debian-machine:latest")?.buildRecipe?.dockerfile.contains("FROM debian:bookworm") == true)
+    }
+
+    @Test("builds machine configuration updates from current state")
+    func buildsMachineConfigurationUpdates() {
+        let summary = MachineSummary(
+            id: "dev",
+            status: "running",
+            isDefault: false,
+            ipAddress: nil,
+            cpus: 4,
+            memory: 8_589_934_592,
+            diskSize: nil,
+            createdDate: nil
+        )
+        let summaryUpdate = MachineConfigurationUpdate(machine: summary)
+
+        #expect(summaryUpdate.cpus == 4)
+        #expect(summaryUpdate.memory == nil)
+        #expect(summaryUpdate.homeMount == .rw)
+        #expect(!summaryUpdate.hasChanges(comparedTo: summaryUpdate))
+        #expect(MachineConfigurationUpdate(cpus: 4, memory: "8G", homeMount: .rw).hasChanges(comparedTo: summaryUpdate))
+        #expect(MachineConfigurationUpdate(cpus: 6, homeMount: .rw).hasChanges(comparedTo: summaryUpdate))
+        #expect(MachineConfigurationUpdate(cpus: 4, homeMount: .ro).hasChanges(comparedTo: summaryUpdate))
+
+        let inspection = MachineInspection(
+            id: "dev",
+            image: .init(reference: "alpine:3.22", descriptor: nil),
+            platform: .init(os: "linux", architecture: "arm64", variant: nil),
+            userSetup: .init(username: "user", uid: 501, gid: 20),
+            status: "running",
+            startedDate: nil,
+            createdDate: nil,
+            containerId: nil,
+            cpus: 6,
+            memory: 4_294_967_296,
+            homeMount: "ro",
+            diskSize: nil,
+            ipAddress: nil
+        )
+        let inspectedUpdate = MachineConfigurationUpdate(machine: summary, inspection: inspection)
+
+        #expect(inspectedUpdate.cpus == 6)
+        #expect(inspectedUpdate.memory == nil)
+        #expect(inspectedUpdate.homeMount == .ro)
     }
 
     @Test("decodes machine list JSON")

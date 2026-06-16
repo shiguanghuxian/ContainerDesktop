@@ -145,7 +145,7 @@ struct ContainerFileEntry: Identifiable, Hashable, Sendable {
     }
 }
 
-struct ContainerStatsSample: Identifiable, Hashable, Sendable {
+struct ContainerStatsSample: Identifiable, Codable, Hashable, Sendable {
     var id = UUID()
     var date: Date
     var snapshot: ContainerStatsSnapshot
@@ -177,6 +177,59 @@ struct ContainerStatsSample: Identifiable, Hashable, Sendable {
             snapshot: snapshot,
             cpuPercent: cpuPercent
         )
+    }
+}
+
+extension Array where Element == ContainerStatsSample {
+    func nearest(to date: Date) -> ContainerStatsSample? {
+        guard !isEmpty else { return nil }
+        guard count > 1 else { return first }
+
+        var lowerBound = 0
+        var upperBound = count - 1
+
+        while lowerBound < upperBound {
+            let midpoint = (lowerBound + upperBound) / 2
+            if self[midpoint].date < date {
+                lowerBound = midpoint + 1
+            } else {
+                upperBound = midpoint
+            }
+        }
+
+        let candidate = self[lowerBound]
+        guard lowerBound > 0 else { return candidate }
+
+        let previous = self[lowerBound - 1]
+        let candidateDistance = abs(candidate.date.timeIntervalSince(date))
+        let previousDistance = abs(previous.date.timeIntervalSince(date))
+        return previousDistance <= candidateDistance ? previous : candidate
+    }
+
+    func downsampled(maxCount: Int) -> [ContainerStatsSample] {
+        guard maxCount > 1, count > maxCount else { return self }
+
+        let step = Double(count - 1) / Double(maxCount - 1)
+        var result: [ContainerStatsSample] = []
+        result.reserveCapacity(maxCount)
+
+        var lastIndex = -1
+        for position in 0..<maxCount {
+            let index = Swift.min(Int((Double(position) * step).rounded()), count - 1)
+            guard index != lastIndex else { continue }
+            result.append(self[index])
+            lastIndex = index
+        }
+
+        if result.last?.id != last?.id, let last {
+            if result.count == maxCount {
+                result[result.count - 1] = last
+            } else {
+                result.append(last)
+            }
+        }
+
+        return result
     }
 }
 

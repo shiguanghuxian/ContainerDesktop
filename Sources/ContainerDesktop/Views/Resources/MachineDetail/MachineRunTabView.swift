@@ -49,6 +49,7 @@ struct MachineRunTabView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(store.isCommandRunning)
+                .help(language.resolved == .zhHans ? "运行命令" : "Run command")
             }
 
             if let error = store.commandError {

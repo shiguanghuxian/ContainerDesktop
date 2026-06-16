@@ -1,10 +1,24 @@
 import Foundation
 import Observation
 
+private enum RuntimeStoreOperationError: LocalizedError {
+    case machineConfigRestartFailed(id: String, detail: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .machineConfigRestartFailed(let id, let detail):
+            return "Machine \(id) 配置已保存，但自动重启失败。\n\(detail)"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class RuntimeStore {
     private let client: ContainerCLIClient
+    private let resourceMonitorClient: ResourceMonitorClient
+    private let componentVersionChecker: ComponentVersionChecking
+    private let maxResourceMonitorSamples = 120
 
     var environment = EnvironmentProbe(
         macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
@@ -23,6 +37,7 @@ final class RuntimeStore {
     var networks: [NetworkSummary] = []
     var registries: [RegistrySummary] = []
     var systemVersions: [SystemVersionEntry] = []
+    var componentVersions: [ComponentVersionItem] = []
     var systemProperties: JSONValue?
     var diskUsage: DiskUsageSummary?
     var selectedInspectorTitle = "Inspect"
@@ -52,13 +67,31 @@ final class RuntimeStore {
     var isVolumeOperationRunning = false
     var globalLogsText = ""
     var globalStats: [ContainerStatsSnapshot] = []
+    var containerResourceSamples: [ContainerResourceSample] = []
+    var resourceMonitorSnapshot: EnvironmentResourceSnapshot?
+    var resourceMonitorHistory: [EnvironmentResourceSnapshot] = []
+    var hostProcessSnapshots: [HostProcessResourceSnapshot] = []
+    var isResourceMonitoring = false
+    var resourceMonitorErrorMessage: String?
     var isObservabilityRefreshing = false
+    var isCheckingComponentVersions = false
+    var componentVersionErrorMessage: String?
+    var componentVersionsLastCheckedAt: Date?
     var activeOperationKey: String?
     var lastUpdated: Date?
     var hasBootstrapped = false
+    @ObservationIgnored private var latestComponentVersionCheck: ComponentLatestVersionCheck?
+    @ObservationIgnored private var resourceMonitorTask: Task<Void, Never>?
+    @ObservationIgnored private var isResourceMonitorSampling = false
 
-    init(client: ContainerCLIClient = ContainerCLIClient()) {
+    init(
+        client: ContainerCLIClient = ContainerCLIClient(),
+        resourceMonitorClient: ResourceMonitorClient? = nil,
+        componentVersionChecker: ComponentVersionChecking = ComponentVersionService()
+    ) {
         self.client = client
+        self.resourceMonitorClient = resourceMonitorClient ?? ResourceMonitorClient(containerClient: client)
+        self.componentVersionChecker = componentVersionChecker
     }
 
     var isReady: Bool {
@@ -156,6 +189,8 @@ final class RuntimeStore {
             systemVersions = []
             systemProperties = nil
             diskUsage = nil
+            rebuildComponentVersions()
+            stopResourceMonitoring()
             return
         }
 
@@ -173,6 +208,90 @@ final class RuntimeStore {
         await refreshRegistries()
         systemProperties = try? await client.systemProperties()
         diskUsage = try? await client.systemDF()
+        rebuildComponentVersions()
+    }
+
+    func checkComponentLatestVersions() async {
+        guard !isCheckingComponentVersions else { return }
+        isCheckingComponentVersions = true
+        componentVersionErrorMessage = nil
+        defer {
+            isCheckingComponentVersions = false
+            componentVersionsLastCheckedAt = Date()
+        }
+
+        let check = await componentVersionChecker.checkLatestVersions()
+        latestComponentVersionCheck = check
+        componentVersionErrorMessage = check.errorMessage
+        rebuildComponentVersions()
+    }
+
+    private func rebuildComponentVersions() {
+        componentVersions = ComponentVersionCatalog.makeItems(
+            environment: environment,
+            systemVersions: systemVersions,
+            latestCheck: latestComponentVersionCheck
+        )
+    }
+
+    func startResourceMonitoring(interval: TimeInterval = 2) {
+        guard !isResourceMonitoring else { return }
+        guard environment.containerAvailable, environment.systemRunning else { return }
+        isResourceMonitoring = true
+        resourceMonitorTask = Task { [weak self] in
+            await self?.refreshResourceMonitorOnce()
+            while !Task.isCancelled {
+                let seconds = max(interval, 1)
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                if Task.isCancelled { break }
+                await self?.refreshResourceMonitorOnce()
+            }
+        }
+    }
+
+    func stopResourceMonitoring() {
+        resourceMonitorTask?.cancel()
+        resourceMonitorTask = nil
+        isResourceMonitoring = false
+        isResourceMonitorSampling = false
+    }
+
+    func refreshResourceMonitorOnce(containerIDs: [String] = []) async {
+        guard environment.containerAvailable, environment.systemRunning else {
+            resourceMonitorSnapshot = nil
+            containerResourceSamples = []
+            hostProcessSnapshots = []
+            resourceMonitorErrorMessage = environment.containerAvailable ? "container system 未运行。" : "未找到 container CLI。"
+            return
+        }
+        guard !isResourceMonitorSampling else { return }
+        isResourceMonitorSampling = true
+        defer { isResourceMonitorSampling = false }
+
+        let selectedIDs = containerIDs.map(\.trimmed).filter { !$0.isEmpty }
+        let previousSamples = Dictionary(uniqueKeysWithValues: containerResourceSamples.map { ($0.id, $0) })
+        let runningCount = containers.filter { $0.state == "running" }.count
+
+        do {
+            let snapshot = try await resourceMonitorClient.sample(
+                containerIDs: selectedIDs,
+                previousSamples: previousSamples,
+                runningContainerCount: runningCount
+            )
+            containerResourceSamples = snapshot.containerSamples
+            hostProcessSnapshots = snapshot.hostProcesses
+            resourceMonitorSnapshot = snapshot.environment
+            resourceMonitorHistory.append(snapshot.environment)
+            if resourceMonitorHistory.count > maxResourceMonitorSamples {
+                resourceMonitorHistory.removeFirst(resourceMonitorHistory.count - maxResourceMonitorSamples)
+            }
+            globalStats = snapshot.containerSamples.map(\.snapshot)
+            resourceMonitorErrorMessage = nil
+            lastUpdated = snapshot.date
+        } catch {
+            resourceMonitorErrorMessage = error.localizedDescription
+            hostProcessSnapshots = []
+        }
     }
 
     func refreshRegistries(reportSuccess: Bool = false) async {
@@ -256,6 +375,7 @@ final class RuntimeStore {
         cpus: String?,
         memory: String?,
         homeMount: String?,
+        buildRecipe: MachineTemplateBuildRecipe? = nil,
         setDefault: Bool,
         noBoot: Bool
     ) async -> Bool {
@@ -269,6 +389,11 @@ final class RuntimeStore {
             existingIDs: machines.map(\.id)
         )
         return await perform("创建 Machine \(trimmedImage)", operationKey: RuntimeOperationKey.machineCreate) {
+            if let buildRecipe {
+                busyMessage = "构建 Machine 模板镜像 \(trimmedImage)"
+                _ = try await client.buildMachineTemplate(buildRecipe)
+                busyMessage = "校验并创建 Machine \(trimmedImage)"
+            }
             try await client.validateMachineImage(reference: trimmedImage)
             try await client.createMachine(
                 name: resolvedName,
@@ -328,6 +453,49 @@ final class RuntimeStore {
     func setDefaultMachine(_ id: String) async {
         await perform("设置默认 Machine \(id)", operationKey: RuntimeOperationKey.machineSetDefault(id)) {
             try await client.setDefaultMachine(id)
+        }
+    }
+
+    func loadMachineInspection(id: String) async throws -> MachineInspection? {
+        try await client.inspectMachine(id).details.first
+    }
+
+    @discardableResult
+    func updateMachineConfig(
+        id: String,
+        update: MachineConfigurationUpdate,
+        restartIfRunning: Bool = false,
+        onWillRestart: (() async -> Void)? = nil
+    ) async -> Bool {
+        guard update.cpus > 0 else {
+            errorMessage = "CPU 数量必须大于 0。"
+            return false
+        }
+        let wasRunning = machines.first { $0.id == id }?.isRunning == true
+        let shouldRestart = restartIfRunning && wasRunning
+
+        return await perform("保存 Machine \(id) 配置", operationKey: RuntimeOperationKey.machineConfig(id)) {
+            busyMessage = "保存 Machine \(id) 配置"
+            try await client.setMachineConfig(
+                id: id,
+                cpus: String(update.cpus),
+                memory: update.memory?.nilIfBlank,
+                homeMount: update.homeMount.rawValue
+            )
+            guard shouldRestart else { return }
+
+            await onWillRestart?()
+            do {
+                busyMessage = "停止 Machine \(id)"
+                try await client.stopMachine(id)
+                busyMessage = "启动 Machine \(id)"
+                try await client.bootMachine(id)
+            } catch {
+                let base = error.localizedDescription
+                let logs = (try? await client.machineLogs(id, lines: 80))?.nilIfBlank
+                let detail = logs.map { "\(base)\n\n最近 Machine 日志：\n\($0)" } ?? base
+                throw RuntimeStoreOperationError.machineConfigRestartFailed(id: id, detail: detail)
+            }
         }
     }
 

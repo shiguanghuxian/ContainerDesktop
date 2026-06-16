@@ -47,3 +47,28 @@ enum MachineHomeMountOption: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
     var title: String { rawValue }
 }
+
+struct MachineConfigurationUpdate: Hashable, Sendable {
+    var cpus: Int
+    var memory: String?
+    var homeMount: MachineHomeMountOption
+
+    init(cpus: Int, memory: String? = nil, homeMount: MachineHomeMountOption) {
+        self.cpus = cpus
+        self.memory = memory?.nilIfBlank
+        self.homeMount = homeMount
+    }
+
+    init(machine: MachineSummary, inspection: MachineInspection? = nil) {
+        let inspectedHomeMount = inspection.flatMap { MachineHomeMountOption(rawValue: $0.homeMount) }
+        self.init(
+            cpus: inspection?.cpus ?? machine.cpus,
+            memory: nil,
+            homeMount: inspectedHomeMount ?? .rw
+        )
+    }
+
+    func hasChanges(comparedTo baseline: MachineConfigurationUpdate) -> Bool {
+        cpus != baseline.cpus || memory?.nilIfBlank != nil || homeMount != baseline.homeMount
+    }
+}

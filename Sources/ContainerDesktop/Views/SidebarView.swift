@@ -139,11 +139,13 @@ struct SidebarView: View {
                 authorLinkLabel(text: "zuoxiupeng@live.com", systemImage: "envelope")
             }
             .buttonStyle(.plain)
+            .help(language.resolved == .zhHans ? "发送邮件给作者" : "Email the author")
 
             Link(destination: URL(string: "https://github.com/shiguanghuxian")!) {
                 authorLinkLabel(text: "github.com/shiguanghuxian", systemImage: "link")
             }
             .buttonStyle(.plain)
+            .help(language.resolved == .zhHans ? "打开作者 GitHub 主页" : "Open the author's GitHub profile")
         }
     }
 
@@ -277,6 +279,7 @@ private struct SidebarNavButton: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "打开\(section.title(language: language))" : "Open \(section.title(language: language))")
     }
 
     private var primaryText: Color {

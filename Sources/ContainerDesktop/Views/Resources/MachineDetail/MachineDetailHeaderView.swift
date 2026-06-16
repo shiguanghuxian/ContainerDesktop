@@ -4,9 +4,11 @@ struct MachineDetailHeaderView: View {
     @Environment(\.appLanguage) private var language
     var machine: MachineSummary
     var inspection: MachineInspection?
+    var isConfigSaving = false
     var onBack: () -> Void
     var onStartStop: () -> Void
     var onSetDefault: () -> Void
+    var onEditConfig: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
@@ -60,14 +62,32 @@ struct MachineDetailHeaderView: View {
                             .frame(width: 34, height: 30)
                     }
                     .buttonStyle(.borderedProminent)
-                    .help(machine.isRunning ? "Stop" : "Run")
+                    .help(machine.isRunning
+                        ? (language.resolved == .zhHans ? "停止 Machine" : "Stop Machine")
+                        : (language.resolved == .zhHans ? "启动 Machine" : "Start Machine"))
 
                     Button(action: onSetDefault) {
                         Image(systemName: machine.isDefault ? "star.fill" : "star")
                             .frame(width: 34, height: 30)
                     }
                     .buttonStyle(.bordered)
-                    .help(language.t(.defaultMachine))
+                    .help(machine.isDefault
+                        ? (language.resolved == .zhHans ? "当前默认 Machine" : "Current default Machine")
+                        : (language.resolved == .zhHans ? "设为默认 Machine" : "Set as default Machine"))
+
+                    Button(action: onEditConfig) {
+                        if isConfigSaving {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 34, height: 30)
+                        } else {
+                            Image(systemName: "pencil")
+                                .frame(width: 34, height: 30)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isConfigSaving)
+                    .help(language.resolved == .zhHans ? "编辑 Machine 配置" : "Edit Machine configuration")
 
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
@@ -75,7 +95,7 @@ struct MachineDetailHeaderView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
-                    .help(language.t(.delete))
+                    .help(language.resolved == .zhHans ? "删除 Machine" : "Delete Machine")
                 }
             }
 

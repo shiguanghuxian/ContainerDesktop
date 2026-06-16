@@ -29,6 +29,7 @@ struct TerminalLockOverlay: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isConnectDisabled)
+                .help(connectTitle)
             }
             .padding(18)
             .frame(maxWidth: 380)

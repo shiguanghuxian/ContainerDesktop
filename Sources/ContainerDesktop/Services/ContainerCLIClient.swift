@@ -2,12 +2,16 @@ import Foundation
 
 enum ContainerCLIClientError: LocalizedError, Sendable {
     case unsupportedMachineImage(reference: String, detail: String)
+    case machineTemplateBuildFailed(reference: String, detail: String)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedMachineImage(let reference, let detail):
             let suffix = detail.trimmed.isEmpty ? "" : "\n\(detail)"
             return "镜像 \(reference) 不适合作为 Machine 镜像，需要包含可执行的 /sbin/init。\(suffix)"
+        case .machineTemplateBuildFailed(let reference, let detail):
+            let suffix = detail.trimmed.isEmpty ? "" : "\n\(detail)"
+            return "Machine 模板镜像 \(reference) 构建失败。请检查网络、apt 源或切换到 Alpine 预设。\(suffix)"
         }
     }
 }
@@ -38,9 +42,17 @@ struct ContainerCLIClient: Sendable {
 
         var systemRunning = false
         var systemVersion: String?
+        var containerVersion: String?
+        var containerComposeVersion: String?
         var errorMessage: String?
 
         if containerAvailable {
+            containerVersion = (try? await runner.run(
+                executable: "container",
+                arguments: ["--version"],
+                timeout: 30
+            ).combinedOutput)?.nilIfBlank
+
             do {
                 let result = try await runner.run(
                     executable: "container",
@@ -56,11 +68,21 @@ struct ContainerCLIClient: Sendable {
             }
         }
 
+        if composeAvailable {
+            containerComposeVersion = (try? await runner.run(
+                executable: "container-compose",
+                arguments: ["version"],
+                timeout: 30
+            ).combinedOutput)?.nilIfBlank
+        }
+
         return EnvironmentProbe(
             macOSVersion: macVersion,
             architecture: architecture,
             containerAvailable: containerAvailable,
             containerComposeAvailable: composeAvailable,
+            containerVersion: containerVersion,
+            containerComposeVersion: containerComposeVersion,
             systemRunning: systemRunning,
             systemVersion: systemVersion,
             errorMessage: errorMessage
@@ -210,6 +232,36 @@ struct ContainerCLIClient: Sendable {
         } catch {
             throw ContainerCLIClientError.unsupportedMachineImage(
                 reference: trimmed,
+                detail: error.localizedDescription
+            )
+        }
+    }
+
+    func buildMachineTemplate(_ recipe: MachineTemplateBuildRecipe) async throws -> String {
+        let fileManager = FileManager.default
+        let contextURL = fileManager.temporaryDirectory.appending(
+            path: "ContainerDesktopMachineTemplate-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+
+        do {
+            try fileManager.createDirectory(at: contextURL, withIntermediateDirectories: true)
+            let dockerfileURL = contextURL.appending(path: "Dockerfile")
+            try recipe.dockerfile.write(to: dockerfileURL, atomically: true, encoding: .utf8)
+            defer {
+                try? fileManager.removeItem(at: contextURL)
+            }
+
+            let result = try await runner.run(
+                executable: "container",
+                arguments: ["build", "-t", recipe.reference, contextURL.path],
+                timeout: 3600
+            )
+            return result.combinedOutput
+        } catch {
+            try? fileManager.removeItem(at: contextURL)
+            throw ContainerCLIClientError.machineTemplateBuildFailed(
+                reference: recipe.reference,
                 detail: error.localizedDescription
             )
         }

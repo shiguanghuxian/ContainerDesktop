@@ -108,14 +108,16 @@ struct ContainerDetailHeaderView: View {
                     .frame(width: 34, height: 30)
             }
             .buttonStyle(.borderedProminent)
-            .help(container.state == "running" ? "Stop" : "Start")
+            .help(container.state == "running"
+                ? (language.resolved == .zhHans ? "停止容器" : "Stop container")
+                : (language.resolved == .zhHans ? "启动容器" : "Start container"))
 
             Button(action: onRestart) {
                 Image(systemName: "arrow.clockwise")
                     .frame(width: 34, height: 30)
             }
             .buttonStyle(.bordered)
-            .help("Restart")
+            .help(language.resolved == .zhHans ? "重启容器" : "Restart container")
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
@@ -123,7 +125,7 @@ struct ContainerDetailHeaderView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .help(language.t(.delete))
+            .help(language.resolved == .zhHans ? "删除容器" : "Delete container")
         }
         .fixedSize()
     }

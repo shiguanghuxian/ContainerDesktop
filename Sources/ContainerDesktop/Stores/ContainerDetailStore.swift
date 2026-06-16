@@ -9,17 +9,8 @@ final class ContainerDetailStore {
     private let maxLogCharacters = 160_000
     private let maxTerminalCharacters = 120_000
     private let maxTerminalOutputEvents = 500
-    private let maxStatSamples = 90
 
-    var selectedTab: ContainerDetailTab = .logs {
-        didSet {
-            if selectedTab == .stats {
-                startStatsPolling()
-            } else {
-                stopStatsPolling()
-            }
-        }
-    }
+    var selectedTab: ContainerDetailTab = .logs
 
     var inspectText = ""
     var inspectSearchText = ""
@@ -52,13 +43,8 @@ final class ContainerDetailStore {
     var isFileLoading = false
     var isFileSaving = false
 
-    var statsSamples: [ContainerStatsSample] = []
-    var statsError: String?
-    var isStatsPolling = false
-
     @ObservationIgnored private var logStream: ContainerProcessStream?
     @ObservationIgnored private var terminalSession: ContainerTerminalSession?
-    @ObservationIgnored private var statsTask: Task<Void, Never>?
 
     init(containerID: String, client: ContainerCLIClient = ContainerCLIClient()) {
         self.containerID = containerID
@@ -106,17 +92,10 @@ final class ContainerDetailStore {
         return try? JSONDecoder.containerDesktop.decode(JSONValue.self, from: data)
     }
 
-    var currentStats: ContainerStatsSnapshot? {
-        statsSamples.last?.snapshot
-    }
-
     func bootstrap() async {
         await refreshInspect()
         await loadLogs()
         await loadFiles(path: filePath)
-        if selectedTab == .stats {
-            startStatsPolling()
-        }
     }
 
     func refreshInspect() async {
@@ -369,47 +348,9 @@ final class ContainerDetailStore {
         await loadFiles(path: parentPath(of: filePath))
     }
 
-    func refreshStatsOnce() async {
-        statsError = nil
-        do {
-            guard let snapshot = try await client.containerStats([containerID]).first(where: { $0.id == containerID }) else {
-                statsError = "暂无 stats 数据。"
-                return
-            }
-            let sample = ContainerStatsSample.make(snapshot: snapshot, previous: statsSamples.last)
-            statsSamples.append(sample)
-            if statsSamples.count > maxStatSamples {
-                statsSamples.removeFirst(statsSamples.count - maxStatSamples)
-            }
-        } catch {
-            statsError = error.localizedDescription
-        }
-    }
-
-    func startStatsPolling() {
-        guard !isStatsPolling else { return }
-        isStatsPolling = true
-        statsTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refreshStatsOnce()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-            await MainActor.run {
-                self?.isStatsPolling = false
-            }
-        }
-    }
-
-    func stopStatsPolling() {
-        statsTask?.cancel()
-        statsTask = nil
-        isStatsPolling = false
-    }
-
     func stopAll() {
         stopLogStream()
         stopTerminal()
-        stopStatsPolling()
     }
 
     private func appendLogChunk(_ chunk: String) {
@@ -465,6 +406,5 @@ final class ContainerDetailStore {
     deinit {
         logStream?.stop()
         terminalSession?.stop()
-        statsTask?.cancel()
     }
 }

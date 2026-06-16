@@ -7,12 +7,10 @@ struct SettingsView: View {
         ZStack {
             TechBackdrop().ignoresSafeArea()
 
-            ScrollView {
-                SystemConfigEditorView(systemConfigStore: systemConfigStore)
-                    .padding(20)
-                    .frame(minWidth: 1040, alignment: .topLeading)
-            }
-            .frame(minWidth: 1040, minHeight: 720)
+            SystemConfigEditorView(systemConfigStore: systemConfigStore)
+                .padding(20)
+                .frame(minWidth: 1040, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .frame(minWidth: 1040, minHeight: 720)
     }
 }

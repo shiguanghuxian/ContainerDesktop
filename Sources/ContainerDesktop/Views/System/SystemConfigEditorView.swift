@@ -66,21 +66,26 @@ struct SystemConfigEditorView: View {
             HStack(alignment: .top, spacing: 0) {
                 settingsSidebar
                     .frame(width: 260)
+                    .frame(maxHeight: .infinity, alignment: .top)
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 18) {
-                    SettingsSectionHeader(
-                        title: selectedCategory.title(language: language),
-                        subtitle: selectedCategory.subtitle(language: language),
-                        systemImage: selectedCategory.systemImage
-                    )
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SettingsSectionHeader(
+                            title: selectedCategory.title(language: language),
+                            subtitle: selectedCategory.subtitle(language: language),
+                            systemImage: selectedCategory.systemImage
+                        )
 
-                    selectedCategoryContent
+                        selectedCategoryContent
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
             .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
@@ -91,6 +96,7 @@ struct SystemConfigEditorView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .task {
             await systemConfigStore.load()
         }
@@ -116,6 +122,7 @@ struct SystemConfigEditorView: View {
                 Label(language.t(.defaults), systemImage: "arrow.counterclockwise")
             }
             .buttonStyle(CDSecondaryButtonStyle())
+            .help(language.resolved == .zhHans ? "恢复默认配置" : "Restore default configuration")
 
             Button {
                 Task { await systemConfigStore.reload() }
@@ -123,6 +130,7 @@ struct SystemConfigEditorView: View {
                 Label(language.t(.reload), systemImage: "arrow.clockwise")
             }
             .buttonStyle(CDSecondaryButtonStyle())
+            .help(language.resolved == .zhHans ? "重新读取配置文件" : "Reload configuration file")
 
             Button {
                 Task { await systemConfigStore.save() }
@@ -131,6 +139,7 @@ struct SystemConfigEditorView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(systemConfigStore.isSaving)
+            .help(language.resolved == .zhHans ? "保存配置文件" : "Save configuration file")
         }
         .padding(14)
         .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
@@ -183,6 +192,7 @@ struct SystemConfigEditorView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
+                    .help(language.resolved == .zhHans ? "打开\(category.title(language: language))设置" : "Open \(category.title(language: language)) settings")
                 }
             }
             .padding(.horizontal, 10)

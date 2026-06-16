@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let systemConfigStore = SystemConfigStore()
     private let operationStore = AppOperationStore()
     private let appUpdateStore = AppUpdateStore()
+    private let statsHistoryStore = ContainerStatsHistoryStore()
 
     private var mainWindow: NSWindow?
     private var mainHostingController: NSHostingController<AnyView>?
@@ -90,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let userDefaultsObserver {
             NotificationCenter.default.removeObserver(userDefaultsObserver)
         }
+        statsHistoryStore.shutdown()
         removeStatusPopoverEventMonitor()
     }
 
@@ -150,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         item.button?.target = self
         item.button?.action = #selector(toggleStatusPopover(_:))
@@ -160,7 +162,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func loadInitialData() {
         Task {
             operationStore.load()
+            statsHistoryStore.load()
             await runtimeStore.bootstrap()
+            if runtimeStore.isReady {
+                statsHistoryStore.startMonitoring(interval: 10)
+            }
             await composeStore.load()
             await composeStore.refreshVersion()
             await systemConfigStore.load()
@@ -249,26 +255,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func refreshStatusItem() {
         guard let button = statusItem?.button else { return }
-        button.image = NSImage(systemSymbolName: runtimeStore.menuBarIcon, accessibilityDescription: nil)
-        button.title = statusItemTitle
+        statusItem?.length = NSStatusItem.squareLength
+        let description = statusItemDescription
+        let configuration = NSImage.SymbolConfiguration(pointSize: 18.5, weight: .semibold)
+        let image = NSImage(systemSymbolName: runtimeStore.menuBarIcon, accessibilityDescription: description)?
+            .withSymbolConfiguration(configuration)
+        image?.isTemplate = true
+        button.image = image
+        button.title = ""
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.toolTip = description
+        button.setAccessibilityLabel(description)
     }
 
     private func refreshStatusPopover() {
         statusPopover?.contentViewController = NSHostingController(rootView: statusPopoverRootView())
     }
 
-    private var statusItemTitle: String {
+    private var statusItemDescription: String {
         if !runtimeStore.environment.containerAvailable {
-            return language.resolved == .zhHans ? "CD 缺失" : "CD !"
+            return language.resolved == .zhHans ? "ContainerDesktop：container CLI 缺失" : "ContainerDesktop: container CLI missing"
         }
         if !runtimeStore.environment.systemRunning {
-            return language.resolved == .zhHans ? "CD 停止" : "CD off"
+            return language.resolved == .zhHans ? "ContainerDesktop：container system 未运行" : "ContainerDesktop: container system stopped"
         }
         if operationStore.activeCount > 0 {
-            return "CD \(operationStore.activeCount)"
+            return language.resolved == .zhHans ? "ContainerDesktop：\(operationStore.activeCount) 个任务运行中" : "ContainerDesktop: \(operationStore.activeCount) tasks running"
         }
         let runningContainers = runtimeStore.containers.filter { $0.state == "running" }.count
-        return runningContainers > 0 ? "CD \(runningContainers)" : "CD"
+        return language.resolved == .zhHans ? "ContainerDesktop：\(runningContainers) 个容器运行中" : "ContainerDesktop: \(runningContainers) containers running"
     }
 
     private func mainRootView() -> AnyView {
@@ -278,7 +294,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 composeStore: composeStore,
                 systemConfigStore: systemConfigStore,
                 operationStore: operationStore,
-                appUpdateStore: appUpdateStore
+                appUpdateStore: appUpdateStore,
+                statsHistoryStore: statsHistoryStore
             )
             .environment(\.appLanguage, language)
             .preferredColorScheme(appearance.colorScheme)
@@ -337,7 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.delegate = self
-        popover.contentSize = NSSize(width: 430, height: 640)
+        popover.contentSize = NSSize(width: 380, height: 460)
         popover.contentViewController = NSHostingController(rootView: statusPopoverRootView())
         statusPopover = popover
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)

@@ -21,6 +21,7 @@ struct MachinesView: View {
     @State private var drawerID: String?
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var pendingDelete: MachineSummary?
+    @State private var editingMachine: MachineSummary?
     @State private var createMachineFormError: String?
     @State private var isSubmittingCreateMachine = false
 
@@ -45,11 +46,12 @@ struct MachinesView: View {
         return runtimeStore.machines.first { $0.id == drawerID }
     }
 
-    private var imageChoices: [String] {
-        FormPresetOptions.choices(
-            current: newMachineImage,
-            suggestions: FormPresetOptions.machineImages
-        )
+    private var machineImagePresets: [MachineImagePreset] {
+        FormPresetOptions.machineImagePresets
+    }
+
+    private var selectedMachineImagePreset: MachineImagePreset? {
+        FormPresetOptions.machineImagePreset(reference: newMachineImage)
     }
 
     private var currentMachineImage: String {
@@ -113,6 +115,17 @@ struct MachinesView: View {
         } message: {
             Text("将删除 Machine \(pendingDelete?.id ?? "所选 Machine")，包括它的持久化存储。")
         }
+        .sheet(item: Binding(
+            get: { editingMachine },
+            set: { editingMachine = $0 }
+        )) { machine in
+            MachineConfigEditSheet(
+                runtimeStore: runtimeStore,
+                machine: machine
+            ) {
+                await runtimeStore.refreshAll()
+            }
+        }
     }
 
     private var pageContent: some View {
@@ -139,6 +152,7 @@ struct MachinesView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(runtimeStore.activeOperationKey != nil)
+                    .help(language.resolved == .zhHans ? "打开创建 Machine 表单" : "Open the create Machine form")
                     .sheet(isPresented: $showCreatePopover) {
                         createMachineForm
                     }
@@ -148,6 +162,7 @@ struct MachinesView: View {
                     } label: {
                         Label(language.t(.refresh), systemImage: "arrow.clockwise")
                     }
+                    .help(language.resolved == .zhHans ? "刷新 Machine 列表" : "Refresh Machines")
                 }
             }
 
@@ -218,6 +233,7 @@ struct MachinesView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .help(language.resolved == .zhHans ? "打开 Machine 详情" : "Open Machine details")
 
                             HStack(spacing: 8) {
                                 let startStopKey = machine.isRunning
@@ -226,7 +242,10 @@ struct MachinesView: View {
                                 RowActionButton(
                                     systemImage: machine.isRunning ? "stop.fill" : "play.fill",
                                     isLoading: runtimeStore.isOperationActive(startStopKey),
-                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(startStopKey)
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(startStopKey),
+                                    help: machine.isRunning
+                                        ? (language.resolved == .zhHans ? "停止 Machine" : "Stop Machine")
+                                        : (language.resolved == .zhHans ? "启动 Machine" : "Start Machine")
                                 ) {
                                     if machine.isRunning {
                                         Task { await runtimeStore.stopMachine(machine.id) }
@@ -234,29 +253,49 @@ struct MachinesView: View {
                                         Task { await runtimeStore.bootMachine(machine.id) }
                                     }
                                 }
-                                RowActionButton(systemImage: "terminal", tint: machine.isRunning ? CDTheme.dockerBlue : .secondary) {
+                                RowActionButton(
+                                    systemImage: "terminal",
+                                    tint: machine.isRunning ? CDTheme.dockerBlue : .secondary,
+                                    help: language.resolved == .zhHans ? "打开 Machine 终端" : "Open Machine terminal"
+                                ) {
                                     openMachineTerminal(machine)
                                 }
                                 let defaultKey = RuntimeOperationKey.machineSetDefault(machine.id)
                                 RowActionButton(
                                     systemImage: machine.isDefault ? "star.fill" : "star",
                                     isLoading: runtimeStore.isOperationActive(defaultKey),
-                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(defaultKey)
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(defaultKey),
+                                    help: machine.isDefault
+                                        ? (language.resolved == .zhHans ? "当前默认 Machine" : "Current default Machine")
+                                        : (language.resolved == .zhHans ? "设为默认 Machine" : "Set as default Machine")
                                 ) {
                                     Task { await runtimeStore.setDefaultMachine(machine.id) }
                                 }
-                                RowActionButton(systemImage: "sidebar.right") {
+                                RowActionButton(
+                                    systemImage: "sidebar.right",
+                                    help: language.resolved == .zhHans ? "打开 Machine 概览抽屉" : "Open Machine overview drawer"
+                                ) {
                                     openMachineDrawer(machine)
+                                }
+                                let configKey = RuntimeOperationKey.machineConfig(machine.id)
+                                RowActionButton(
+                                    systemImage: "pencil",
+                                    isLoading: runtimeStore.isOperationActive(configKey),
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(configKey),
+                                    help: language.resolved == .zhHans ? "编辑 Machine 配置" : "Edit Machine configuration"
+                                ) {
+                                    editingMachine = machine
                                 }
                                 let deleteKey = RuntimeOperationKey.machineDelete(machine.id)
                                 DestructiveRowActionButton(
                                     isLoading: runtimeStore.isOperationActive(deleteKey),
-                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey)
+                                    isDisabled: runtimeStore.activeOperationKey != nil && !runtimeStore.isOperationActive(deleteKey),
+                                    help: language.resolved == .zhHans ? "删除 Machine" : "Delete Machine"
                                 ) {
                                     pendingDelete = machine
                                 }
                             }
-                            .frame(width: 176, alignment: .trailing)
+                            .frame(width: 216, alignment: .trailing)
                         }
                     }
                 }
@@ -304,7 +343,7 @@ struct MachinesView: View {
             ResourceTableHeaderLabel(title: "Disk", width: 86, alignment: .trailing)
             ResourceTableHeaderLabel(title: language.t(.status), width: 76)
             ResourceTableHeaderLabel(title: language.t(.defaultMachine), width: 42, alignment: .center)
-            ResourceTableHeaderLabel(title: language.t(.actions), width: 176, alignment: .trailing)
+            ResourceTableHeaderLabel(title: language.t(.actions), width: 216, alignment: .trailing)
         }
     }
 
@@ -330,12 +369,17 @@ struct MachinesView: View {
             }
 
             Picker(language.t(.image), selection: $newMachineImage) {
-                ForEach(imageChoices, id: \.self) { reference in
-                    Text(reference).tag(reference)
+                ForEach(machineImagePresets) { preset in
+                    Text(preset.pickerTitle(language: language)).tag(preset.reference)
                 }
             }
             .frame(width: 340)
             .disabled(useCustomMachineImage || isCreateMachineBusy)
+
+            if !useCustomMachineImage, let selectedMachineImagePreset {
+                machineImagePresetInfo(selectedMachineImagePreset)
+                    .frame(width: 340)
+            }
 
             Toggle(language.resolved == .zhHans ? "使用自定义镜像引用" : "Use custom image reference", isOn: $useCustomMachineImage)
                 .toggleStyle(.switch)
@@ -354,8 +398,8 @@ struct MachinesView: View {
 
             StatusBanner(
                 text: language.resolved == .zhHans
-                    ? "下拉只提供推荐 Machine 镜像。自定义镜像需要包含可执行的 /sbin/init，普通容器镜像会被创建前校验拦截。"
-                    : "The picker only lists recommended machine images. Custom images must include an executable /sbin/init and are validated before create.",
+                    ? "预设包含 Alpine 直接可用镜像，以及创建时会自动构建的 Ubuntu/Debian 本地 Machine 模板。所有镜像创建前都会校验 /sbin/init。"
+                    : "Presets include directly usable Alpine images and local Ubuntu/Debian Machine templates that are built automatically during create. Every image is validated for /sbin/init before create.",
                 systemImage: "info.circle",
                 tint: CDTheme.dockerBlue
             )
@@ -363,7 +407,7 @@ struct MachinesView: View {
 
             if isCreateMachineBusy {
                 StatusBanner(
-                    text: language.resolved == .zhHans ? "正在校验镜像并创建 Machine..." : "Validating image and creating machine...",
+                    text: runtimeStore.busyMessage ?? (language.resolved == .zhHans ? "正在校验镜像并创建 Machine..." : "Validating image and creating machine..."),
                     systemImage: "hourglass",
                     tint: CDTheme.dockerBlue
                 )
@@ -413,11 +457,13 @@ struct MachinesView: View {
                     showCreatePopover = false
                 }
                 .disabled(isCreateMachineBusy)
+                .help(language.resolved == .zhHans ? "取消创建 Machine" : "Cancel creating Machine")
                 Button(language.t(.create)) {
                     self.submitCreateMachine()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(runtimeStore.activeOperationKey != nil || isSubmittingCreateMachine)
+                .help(language.resolved == .zhHans ? "创建 Machine" : "Create Machine")
             }
             .frame(width: 340)
         }
@@ -439,6 +485,7 @@ struct MachinesView: View {
         let homeMount = newMachineHomeMount.rawValue
         let setDefault = newMachineSetDefault
         let noBoot = newMachineNoBoot
+        let buildRecipe = useCustomMachineImage ? nil : selectedMachineImagePreset?.buildRecipe
 
         Task { @MainActor in
             let succeeded = await runtimeStore.createMachine(
@@ -447,6 +494,7 @@ struct MachinesView: View {
                 cpus: cpus,
                 memory: memory,
                 homeMount: homeMount,
+                buildRecipe: buildRecipe,
                 setDefault: setDefault,
                 noBoot: noBoot
             )
@@ -458,6 +506,48 @@ struct MachinesView: View {
                 createMachineFormError = runtimeStore.errorMessage
                     ?? (language.resolved == .zhHans ? "创建 Machine 失败。" : "Failed to create machine.")
             }
+        }
+    }
+
+    private func machineImagePresetInfo(_ preset: MachineImagePreset) -> some View {
+        let tint = preset.requiresLocalBuild ? CDTheme.ember : CDTheme.dockerBlue
+
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Image(systemName: preset.requiresLocalBuild ? "hammer" : "checkmark.seal")
+                    .foregroundStyle(tint)
+                    .frame(width: 18)
+                Text(preset.title(language: language))
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+            }
+
+            Text(preset.reference)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text(preset.description(language: language))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if preset.requiresLocalBuild {
+                Text(language.resolved == .zhHans
+                    ? "点击创建时会先自动构建模板镜像，然后再校验并创建 Machine。"
+                    : "Create will build this template image first, then validate it and create the Machine.")
+                    .font(.caption)
+                    .foregroundStyle(tint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(tint.opacity(0.20))
         }
     }
 

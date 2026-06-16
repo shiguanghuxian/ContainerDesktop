@@ -1,52 +1,6 @@
 import AppKit
 import SwiftUI
 
-struct MenuBarStatusLabel: View {
-    @Environment(\.appLanguage) private var language
-    @Bindable var runtimeStore: RuntimeStore
-    @Bindable var operationStore: AppOperationStore
-
-    private var runningContainers: Int {
-        runtimeStore.containers.filter { $0.state == "running" }.count
-    }
-
-    private var labelText: String {
-        if !runtimeStore.environment.containerAvailable {
-            return language.resolved == .zhHans ? "CD 缺失" : "CD !"
-        }
-        if !runtimeStore.environment.systemRunning {
-            return language.resolved == .zhHans ? "CD 停止" : "CD off"
-        }
-        if operationStore.activeCount > 0 {
-            return "CD \(operationStore.activeCount)"
-        }
-        return runningContainers > 0 ? "CD \(runningContainers)" : "CD"
-    }
-
-    private var symbolName: String {
-        if !runtimeStore.environment.containerAvailable {
-            return "exclamationmark.triangle.fill"
-        }
-        if !runtimeStore.environment.systemRunning {
-            return "shippingbox.circle"
-        }
-        if operationStore.activeCount > 0 {
-            return "clock.arrow.circlepath"
-        }
-        return "shippingbox.circle.fill"
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: symbolName)
-                .symbolRenderingMode(.hierarchical)
-            Text(labelText)
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-        }
-    }
-}
-
 struct MenuBarStatusView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
@@ -56,7 +10,6 @@ struct MenuBarStatusView: View {
     @AppStorage("containerdesktop.selected.section") private var selectedSectionRaw = AppSection.dashboard.rawValue
 
     private let metricColumns = [
-        GridItem(.flexible(), spacing: 8),
         GridItem(.flexible(), spacing: 8),
         GridItem(.flexible(), spacing: 8),
     ]
@@ -145,36 +98,29 @@ struct MenuBarStatusView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     healthCard
-                    signalDeck
-                    runtimeDetailsCard
+                    resourceSnapshotCard
                     resourceGrid
-                    recentResourcesCard
 
-                    if let diskUsage = runtimeStore.diskUsage {
-                        diskCard(diskUsage)
-                    }
-
-                    composeCard
-
-                    if !recentOperations.isEmpty {
-                        operationsCard
+                    if operationStore.activeCount > 0 {
+                        activeTaskCard
                     }
 
                     actionsCard
                 }
                 .padding(12)
             }
-            .frame(maxHeight: 620)
+            .frame(maxHeight: 360)
             .scrollIndicators(.hidden)
 
             footer
         }
-        .frame(width: 430)
+        .frame(width: 380)
         .background(CDTheme.appBackground)
         .task {
             operationStore.load()
             await runtimeStore.bootstrap()
             await composeStore.load()
+            await runtimeStore.refreshResourceMonitorOnce()
         }
     }
 
@@ -289,6 +235,67 @@ struct MenuBarStatusView: View {
         }
     }
 
+    private var resourceSnapshotCard: some View {
+        MenuBarPanel(accent: CDTheme.dockerBlue) {
+            VStack(alignment: .leading, spacing: 10) {
+                MenuBarSectionHeader(
+                    title: localized("资源快照", "Resource snapshot"),
+                    subtitle: localized("CPU、内存、网络和 I/O", "CPU, memory, network, and I/O"),
+                    systemImage: "chart.xyaxis.line"
+                )
+
+                if let errorMessage = runtimeStore.resourceMonitorErrorMessage?.nilIfBlank {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(CDTheme.ember)
+                        .lineLimit(2)
+                }
+
+                if let snapshot = runtimeStore.resourceMonitorSnapshot {
+                    LazyVGrid(columns: metricColumns, spacing: 8) {
+                        MenuBarMetricCard(
+                            title: "CPU",
+                            value: String(format: "%.1f%%", snapshot.cpuPercent),
+                            subtitle: localized("容器聚合", "containers"),
+                            tint: CDTheme.dockerBlue
+                        )
+                        MenuBarMetricCard(
+                            title: "Memory",
+                            value: ByteCountFormatter.string(fromByteCount: snapshot.memoryUsageBytes, countStyle: .memory),
+                            subtitle: snapshot.memoryLimitBytes > 0 ? snapshot.memoryDisplay : localized("使用中", "in use"),
+                            tint: CDTheme.cyan
+                        )
+                        MenuBarMetricCard(
+                            title: "Network",
+                            value: ContainerResourceSample.bytesPerSecond(snapshot.networkRxBytesPerSecond + snapshot.networkTxBytesPerSecond),
+                            subtitle: snapshot.networkRateDisplay,
+                            tint: CDTheme.lime
+                        )
+                        MenuBarMetricCard(
+                            title: "Block I/O",
+                            value: ContainerResourceSample.bytesPerSecond(snapshot.blockReadBytesPerSecond + snapshot.blockWriteBytesPerSecond),
+                            subtitle: snapshot.blockIORateDisplay,
+                            tint: CDTheme.ember
+                        )
+                    }
+
+                    HStack(spacing: 10) {
+                        Label("\(snapshot.numProcesses) PIDs", systemImage: "number")
+                        Spacer()
+                        Label("\(snapshot.hostMemoryDisplay) RSS", systemImage: "cpu")
+                    }
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                } else {
+                    Label(localized("等待资源数据，点击刷新可立即采样。", "Waiting for resource data. Refresh to sample now."), systemImage: "chart.xyaxis.line")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var healthCard: some View {
         let issues = runtimeStore.onboardingIssues(language: language)
@@ -333,8 +340,31 @@ struct MenuBarStatusView: View {
                             Label(language.t(.startSystem), systemImage: "play.circle")
                         }
                         .buttonStyle(.borderedProminent)
+                        .help(localized("启动 container system", "Start container system"))
                     }
                 }
+            }
+        }
+    }
+
+    private var activeTaskCard: some View {
+        MenuBarPanel(accent: CDTheme.dockerBlue) {
+            HStack(spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(CDTheme.dockerBlue)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(localized("任务运行中", "Tasks running"))
+                        .font(.callout.weight(.semibold))
+                    Text(localized("\(operationStore.activeCount) 个操作正在执行", "\(operationStore.activeCount) operation(s) in progress"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
             }
         }
     }
@@ -343,8 +373,8 @@ struct MenuBarStatusView: View {
         MenuBarPanel(accent: CDTheme.dockerBlue) {
             VStack(alignment: .leading, spacing: 10) {
                 MenuBarSectionHeader(
-                    title: localized("本地资源", "Local resources"),
-                    subtitle: localized("来自当前 RuntimeStore 快照", "Current RuntimeStore snapshot"),
+                    title: localized("核心数量", "Core counts"),
+                    subtitle: localized("容器、Machine、镜像和 Compose", "Containers, machines, images, and Compose"),
                     systemImage: "rectangle.grid.3x2"
                 )
 
@@ -366,18 +396,6 @@ struct MenuBarStatusView: View {
                         value: "\(runtimeStore.images.count)",
                         subtitle: localized("本地镜像", "Local images"),
                         tint: CDTheme.violet
-                    )
-                    MenuBarMetricCard(
-                        title: language.t(.volumes),
-                        value: "\(runtimeStore.volumes.count)",
-                        subtitle: localized("数据卷", "Volumes"),
-                        tint: CDTheme.lime
-                    )
-                    MenuBarMetricCard(
-                        title: language.t(.networks),
-                        value: "\(runtimeStore.networks.count)",
-                        subtitle: localized("网络", "Networks"),
-                        tint: CDTheme.ember
                     )
                     MenuBarMetricCard(
                         title: language.t(.compose),
@@ -546,15 +564,6 @@ struct MenuBarStatusView: View {
                     MenuBarActionButton(title: language.t(.observability), systemImage: "waveform.path.ecg") {
                         openMain(section: .observability)
                     }
-                    MenuBarActionButton(title: language.t(.help), systemImage: "questionmark.circle") {
-                        openMain(section: .help)
-                    }
-                    MenuBarActionButton(title: language.t(.about), systemImage: "info.circle") {
-                        openMain(section: .about)
-                    }
-                    MenuBarActionButton(title: language.t(.settings), systemImage: "gearshape") {
-                        openSettings()
-                    }
                     MenuBarActionButton(title: language.t(.refresh), systemImage: "arrow.clockwise") {
                         refresh()
                     }
@@ -565,6 +574,9 @@ struct MenuBarStatusView: View {
                         toggleSystem()
                     }
                     .disabled(!runtimeStore.environment.containerAvailable)
+                    MenuBarActionButton(title: language.t(.settings), systemImage: "gearshape") {
+                        openSettings()
+                    }
                 }
             }
         }
@@ -584,6 +596,7 @@ struct MenuBarStatusView: View {
                 Label(localized("退出", "Quit"), systemImage: "power")
             }
             .buttonStyle(.plain)
+            .help(localized("退出 ContainerDesktop", "Quit ContainerDesktop"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -599,6 +612,7 @@ struct MenuBarStatusView: View {
         Task {
             await runtimeStore.refreshAll()
             await composeStore.reloadProjects()
+            await runtimeStore.refreshResourceMonitorOnce()
         }
     }
 
@@ -609,6 +623,7 @@ struct MenuBarStatusView: View {
             } else {
                 await runtimeStore.startSystem()
             }
+            await runtimeStore.refreshResourceMonitorOnce()
         }
     }
 
@@ -1024,6 +1039,7 @@ private struct MenuBarOperationRow: View {
 private struct MenuBarActionButton: View {
     var title: String
     var systemImage: String
+    var help: String?
     var action: () -> Void
 
     var body: some View {
@@ -1035,5 +1051,6 @@ private struct MenuBarActionButton: View {
                 .frame(height: 30)
         }
         .buttonStyle(.bordered)
+        .help(help ?? title)
     }
 }

@@ -16,6 +16,8 @@ struct ObservabilityView: View {
     @State private var autoRefresh = false
     @State private var refreshInterval = "10"
     @State private var statsSort: ObservabilityStatsSort = .memory
+    @State private var showResourceDrawer = false
+    @State private var resourceSampleScopeKey = ""
     @State private var liveLogStore = GlobalLogStreamStore()
 
     private var scopedContainers: [ContainerSummary] {
@@ -63,10 +65,35 @@ struct ObservabilityView: View {
         visibleStats.sortedForObservability(by: statsSort)
     }
 
+    private var scopedContainerIDs: [String] {
+        scopedContainers.map(\.id)
+    }
+
+    private var scopedContainerKey: String {
+        scopedContainerIDs.sorted().joined(separator: "|")
+    }
+
     private var visibleStats: [ContainerStatsSnapshot] {
-        let ids = Set(scopedContainers.map(\.id))
+        let ids = Set(scopedContainerIDs)
         guard !ids.isEmpty else { return [] }
         return runtimeStore.globalStats.filter { ids.contains($0.id) }
+    }
+
+    private var visibleResourceSamples: [ContainerResourceSample] {
+        let ids = Set(scopedContainerIDs)
+        guard !ids.isEmpty else { return [] }
+        return runtimeStore.containerResourceSamples.filter { ids.contains($0.id) }
+    }
+
+    private var scopedResourceSnapshot: EnvironmentResourceSnapshot? {
+        guard !visibleResourceSamples.isEmpty else { return nil }
+        let sampleDate = visibleResourceSamples.map(\.date).max() ?? Date()
+        return EnvironmentResourceSnapshot(
+            date: sampleDate,
+            containerSamples: visibleResourceSamples,
+            runningContainerCount: scopedContainers.filter { $0.state == "running" }.count,
+            hostProcesses: runtimeStore.hostProcessSnapshots
+        )
     }
 
     private var composeScopes: [ObservabilityComposeScope] {
@@ -79,6 +106,48 @@ struct ObservabilityView: View {
     }
 
     var body: some View {
+        DrawerPageLayout(
+            isDrawerPresented: showResourceDrawer,
+            onDismiss: closeResourceDrawer,
+            drawerWidth: 620
+        ) {
+            pageContent
+        } drawer: {
+            resourceDrawer
+        }
+        .task {
+            if runtimeStore.globalLogsText.isEmpty {
+                refresh()
+            }
+        }
+        .task(id: autoRefresh) {
+            guard autoRefresh else { return }
+            while !Task.isCancelled, autoRefresh {
+                let seconds = max(min(Int(refreshInterval.trimmed) ?? 10, 300), 5)
+                try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+                if !Task.isCancelled {
+                    if !liveLogStore.isStreaming {
+                        await refreshNow()
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            liveLogStore.stop()
+            runtimeStore.stopResourceMonitoring()
+        }
+        .onChange(of: logSource) { _, _ in
+            liveLogStore.stop()
+            liveLogStore.clear()
+            refresh()
+        }
+        .onChange(of: scopedContainerKey) { _, _ in
+            guard showResourceDrawer else { return }
+            refreshResourceSnapshot()
+        }
+    }
+
+    private var pageContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             PageHeader(
                 title: language.t(.observability),
@@ -105,44 +174,7 @@ struct ObservabilityView: View {
                 filteredCount: scopedContainers.count
             )
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 16) {
-                    statsPanel
-                        .frame(minWidth: 380, maxWidth: 500)
-                    logsPanel
-                        .frame(maxWidth: .infinity)
-                }
-
-                VStack(alignment: .leading, spacing: 16) {
-                    statsPanel
-                    logsPanel
-                }
-            }
-        }
-        .task {
-            if runtimeStore.globalLogsText.isEmpty {
-                refresh()
-            }
-        }
-        .task(id: autoRefresh) {
-            guard autoRefresh else { return }
-            while !Task.isCancelled, autoRefresh {
-                let seconds = max(min(Int(refreshInterval.trimmed) ?? 10, 300), 5)
-                try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
-                if !Task.isCancelled {
-                    if !liveLogStore.isStreaming {
-                        await refreshNow()
-                    }
-                }
-            }
-        }
-        .onDisappear {
-            liveLogStore.stop()
-        }
-        .onChange(of: logSource) { _, _ in
-            liveLogStore.stop()
-            liveLogStore.clear()
-            refresh()
+            logsPanel
         }
     }
 
@@ -150,8 +182,30 @@ struct ObservabilityView: View {
         Task { await refreshNow() }
     }
 
+    private func toggleResourceDrawer() {
+        showResourceDrawer.toggle()
+        if showResourceDrawer, (resourceSampleScopeKey != scopedContainerKey || visibleResourceSamples.isEmpty) {
+            refreshResourceSnapshot()
+        }
+    }
+
+    private func closeResourceDrawer() {
+        showResourceDrawer = false
+    }
+
+    private func refreshResourceSnapshot() {
+        Task { await refreshResourceSnapshotNow() }
+    }
+
     private var headerActions: some View {
         HStack(spacing: 8) {
+            Button {
+                toggleResourceDrawer()
+            } label: {
+                Label(language.resolved == .zhHans ? "资源快照" : "Stats Snapshot", systemImage: "sidebar.right")
+            }
+            .help(language.resolved == .zhHans ? "打开资源快照抽屉" : "Open stats snapshot drawer")
+
             Button {
                 refresh()
             } label: {
@@ -167,6 +221,7 @@ struct ObservabilityView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(runtimeStore.isObservabilityRefreshing)
+            .help(language.resolved == .zhHans ? "刷新日志和资源数据" : "Refresh logs and resource data")
 
             Button {
                 toggleLiveLogs()
@@ -185,13 +240,54 @@ struct ObservabilityView: View {
                 }
             }
             .disabled(liveLogStore.isStarting)
+            .help(liveLogStore.isStreaming
+                ? (language.resolved == .zhHans ? "停止实时日志" : "Stop live logs")
+                : (language.resolved == .zhHans ? "启动实时日志" : "Start live logs"))
 
             Button {
                 exportLogs()
             } label: {
                 Label(language.resolved == .zhHans ? "导出" : "Export", systemImage: "square.and.arrow.up")
             }
+            .help(language.resolved == .zhHans ? "导出当前日志" : "Export current logs")
         }
+    }
+
+    private var resourceDrawer: some View {
+        VStack(spacing: 0) {
+            DrawerHeader(
+                title: language.resolved == .zhHans ? "资源快照" : "Stats Snapshot",
+                subtitle: "container stats --no-stream · \(composeScopeTitle(composeScope))",
+                systemImage: "chart.xyaxis.line",
+                onClose: closeResourceDrawer
+            )
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    EnvironmentResourceMonitorPanel(
+                        snapshot: scopedResourceSnapshot,
+                        hostProcesses: runtimeStore.hostProcessSnapshots,
+                        errorMessage: runtimeStore.resourceMonitorErrorMessage
+                    )
+
+                    if !runtimeStore.resourceMonitorHistory.isEmpty {
+                        ResourceMonitorChartsPanel(history: runtimeStore.resourceMonitorHistory)
+                    }
+
+                    if visibleResourceSamples.isEmpty, !visibleStats.isEmpty {
+                        statsPanel
+                    } else {
+                        ContainerResourceSamplesPanel(samples: visibleResourceSamples, sort: statsSort)
+                    }
+
+                    HostProcessResourcesPanel(processes: runtimeStore.hostProcessSnapshots)
+                }
+                .padding(16)
+            }
+        }
+        .drawerSurface(width: 620)
     }
 
     private var statsPanel: some View {
@@ -307,6 +403,22 @@ struct ObservabilityView: View {
             logSource: logSource,
             systemLogLast: ObservabilityInputNormalizer.systemLogLast(systemLogLast)
         )
+        await refreshResourceSnapshotNow()
+    }
+
+    private func refreshResourceSnapshotNow() async {
+        let scopeKey = scopedContainerKey
+        let ids = scopedContainerIDs
+        guard !ids.isEmpty else {
+            await MainActor.run {
+                resourceSampleScopeKey = scopeKey
+            }
+            return
+        }
+        await runtimeStore.refreshResourceMonitorOnce(containerIDs: ids)
+        await MainActor.run {
+            resourceSampleScopeKey = scopeKey
+        }
     }
 
     private func exportLogs() {

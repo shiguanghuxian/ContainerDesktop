@@ -5,9 +5,33 @@ struct EnvironmentProbe: Codable, Hashable, Sendable {
     var architecture: String
     var containerAvailable: Bool
     var containerComposeAvailable: Bool
+    var containerVersion: String?
+    var containerComposeVersion: String?
     var systemRunning: Bool
     var systemVersion: String?
     var errorMessage: String?
+
+    init(
+        macOSVersion: String,
+        architecture: String,
+        containerAvailable: Bool,
+        containerComposeAvailable: Bool,
+        containerVersion: String? = nil,
+        containerComposeVersion: String? = nil,
+        systemRunning: Bool,
+        systemVersion: String?,
+        errorMessage: String?
+    ) {
+        self.macOSVersion = macOSVersion
+        self.architecture = architecture
+        self.containerAvailable = containerAvailable
+        self.containerComposeAvailable = containerComposeAvailable
+        self.containerVersion = containerVersion
+        self.containerComposeVersion = containerComposeVersion
+        self.systemRunning = systemRunning
+        self.systemVersion = systemVersion
+        self.errorMessage = errorMessage
+    }
 }
 
 struct ContainerSummary: Identifiable, Codable, Hashable, Sendable {
@@ -180,11 +204,74 @@ struct ImageSummary: Identifiable, Codable, Hashable, Sendable {
         struct Platform: Codable, Hashable, Sendable {
             var os: String
             var architecture: String
+            var variant: String?
+
+            var displayName: String {
+                [os, architecture, variant]
+                    .compactMap { $0?.nilIfBlank }
+                    .joined(separator: "/")
+            }
+        }
+
+        struct Config: Codable, Hashable, Sendable {
+            struct History: Codable, Hashable, Sendable {
+                var created: Date?
+                var createdBy: String?
+                var comment: String?
+                var emptyLayer: Bool?
+
+                enum CodingKeys: String, CodingKey {
+                    case created
+                    case createdBy = "created_by"
+                    case comment
+                    case emptyLayer = "empty_layer"
+                }
+
+                var instruction: String {
+                    createdBy?.nilIfBlank ?? "—"
+                }
+
+                var createdText: String {
+                    guard let created else { return "—" }
+                    return created.formatted(date: .abbreviated, time: .shortened)
+                }
+            }
+
+            struct RootFS: Codable, Hashable, Sendable {
+                var diffIDs: [String]
+                var type: String?
+
+                enum CodingKeys: String, CodingKey {
+                    case diffIDs = "diff_ids"
+                    case type
+                }
+            }
+
+            var architecture: String?
+            var os: String?
+            var variant: String?
+            var created: Date?
+            var history: [History]?
+            var rootfs: RootFS?
         }
 
         var platform: Platform
         var digest: String
         var size: Int64
+        var config: Config?
+
+        var platformText: String {
+            let value = platform.displayName
+            return value.isEmpty ? "—" : value
+        }
+
+        var sizeDisplay: String {
+            ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+        }
+
+        var layers: [ImageLayerEntry] {
+            ImageLayerEntry.make(from: self)
+        }
     }
 
     var id: String {
@@ -212,6 +299,64 @@ struct ImageSummary: Identifiable, Codable, Hashable, Sendable {
     var createdText: String {
         guard let creationDate = configuration.creationDate else { return "—" }
         return creationDate.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+struct ImageLayerEntry: Identifiable, Hashable, Sendable {
+    var index: Int
+    var instruction: String
+    var diffID: String?
+    var createdAt: Date?
+    var comment: String?
+    var isEmptyLayer: Bool
+
+    var id: Int { index }
+
+    var digestText: String {
+        diffID ?? "—"
+    }
+
+    var displayInstruction: String {
+        var value = instruction.trimmed
+        if value.hasPrefix("/bin/sh -c #(nop)") {
+            value = String(value.dropFirst("/bin/sh -c #(nop)".count)).trimmed
+        } else if value.hasPrefix("/bin/sh -c") {
+            value = String(value.dropFirst("/bin/sh -c".count)).trimmed
+        }
+        if value.hasSuffix("# buildkit") {
+            value = String(value.dropLast("# buildkit".count)).trimmed
+        }
+        return value.isEmpty ? "—" : value
+    }
+
+    var createdText: String {
+        guard let createdAt else { return "—" }
+        return createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var layerTypeText: String {
+        isEmptyLayer ? "metadata" : "filesystem"
+    }
+
+    var sizeDisplay: String {
+        "—"
+    }
+
+    static func make(from variant: ImageSummary.Variant) -> [ImageLayerEntry] {
+        let history = variant.config?.history ?? []
+        var diffIDs = variant.config?.rootfs?.diffIDs ?? []
+        return history.enumerated().map { offset, item in
+            let isEmptyLayer = item.emptyLayer == true
+            let diffID = isEmptyLayer ? nil : (diffIDs.isEmpty ? nil : diffIDs.removeFirst())
+            return ImageLayerEntry(
+                index: offset,
+                instruction: item.instruction,
+                diffID: diffID,
+                createdAt: item.created,
+                comment: item.comment,
+                isEmptyLayer: isEmptyLayer
+            )
+        }
     }
 }
 

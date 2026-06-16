@@ -8,6 +8,7 @@ struct ContentView: View {
     @Bindable var systemConfigStore: SystemConfigStore
     @Bindable var operationStore: AppOperationStore
     @Bindable var appUpdateStore: AppUpdateStore
+    @Bindable var statsHistoryStore: ContainerStatsHistoryStore
 
     @AppStorage("containerdesktop.selected.section") private var selectedSectionRaw = AppSection.dashboard.rawValue
     @AppStorage("containerdesktop.sidebar.collapsed") private var isSidebarCollapsed = false
@@ -58,10 +59,19 @@ struct ContentView: View {
         .ignoresSafeArea(.container, edges: [.top])
         .task {
             operationStore.load()
+            statsHistoryStore.load()
             await runtimeStore.bootstrap()
             await composeStore.load()
             await composeStore.refreshVersion()
             await systemConfigStore.load()
+        }
+        .task(id: runtimeStore.isReady) {
+            statsHistoryStore.load()
+            if runtimeStore.isReady {
+                statsHistoryStore.startMonitoring(interval: 10)
+            } else {
+                statsHistoryStore.stopMonitoring()
+            }
         }
         .onAppear {
             ContainerDesktopMainMenuController.shared.updateSelectedSection(selectedSection)
@@ -114,7 +124,7 @@ struct ContentView: View {
                     )
                 }
             case .containers:
-                ContainersView(runtimeStore: runtimeStore)
+                ContainersView(runtimeStore: runtimeStore, statsHistoryStore: statsHistoryStore)
             case .machines:
                 MachinesView(runtimeStore: runtimeStore)
             case .images:
@@ -124,11 +134,14 @@ struct ContentView: View {
             case .networks:
                 NetworksView(runtimeStore: runtimeStore)
             case .compose:
-                ComposeView(runtimeStore: runtimeStore, composeStore: composeStore, operationStore: operationStore)
+                ComposeView(
+                    runtimeStore: runtimeStore,
+                    composeStore: composeStore,
+                    operationStore: operationStore,
+                    statsHistoryStore: statsHistoryStore
+                )
             case .observability:
-                PageScrollContainer {
-                    ObservabilityView(runtimeStore: runtimeStore, composeStore: composeStore)
-                }
+                ObservabilityView(runtimeStore: runtimeStore, composeStore: composeStore)
             case .registries:
                 RegistriesView(runtimeStore: runtimeStore)
             case .commandConverter:

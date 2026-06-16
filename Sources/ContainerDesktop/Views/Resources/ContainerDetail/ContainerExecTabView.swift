@@ -75,6 +75,7 @@ struct ContainerExecTabView: View {
                 Label(language.resolved == .zhHans ? "外部终端" : "External Terminal", systemImage: "macwindow")
             }
             .disabled(container.state != "running")
+            .help(language.resolved == .zhHans ? "在外部终端打开 Exec" : "Open Exec in external terminal")
 
             Button {
                 Task { await store.startTerminal() }
@@ -83,6 +84,7 @@ struct ContainerExecTabView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(container.state != "running" || store.terminalState.isConnected)
+            .help(language.resolved == .zhHans ? "连接容器终端" : "Connect container terminal")
 
             Button {
                 store.stopTerminal()
@@ -90,6 +92,7 @@ struct ContainerExecTabView: View {
                 Label(language.resolved == .zhHans ? "断开" : "Disconnect", systemImage: "xmark.circle")
             }
             .disabled(!store.terminalState.isConnected)
+            .help(language.resolved == .zhHans ? "断开容器终端" : "Disconnect container terminal")
 
             Button {
                 store.clearTerminal()

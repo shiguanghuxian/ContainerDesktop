@@ -38,6 +38,7 @@ struct DockerCommandConverterView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(conversion.commandText.isEmpty)
+                    .help(language.resolved == .zhHans ? "复制转换后的命令" : "Copy the converted command")
 
                     Button {
                         dockerCommand = ""
@@ -45,6 +46,7 @@ struct DockerCommandConverterView: View {
                         Label(language.resolved == .zhHans ? "清空" : "Clear", systemImage: "xmark.circle")
                     }
                     .disabled(dockerCommand.isEmpty)
+                    .help(language.resolved == .zhHans ? "清空输入" : "Clear input")
                 }
             }
 
@@ -96,6 +98,7 @@ struct DockerCommandConverterView: View {
                             dockerCommand = sample
                         }
                         .buttonStyle(.borderless)
+                        .help(language.resolved == .zhHans ? "填入示例命令" : "Use sample command")
                     }
                     Spacer()
                 }
@@ -119,6 +122,7 @@ struct DockerCommandConverterView: View {
                         Label(language.resolved == .zhHans ? "复制" : "Copy", systemImage: "doc.on.doc")
                     }
                     .disabled(conversion.commandText.isEmpty)
+                    .help(language.resolved == .zhHans ? "复制转换后的命令" : "Copy the converted command")
                 }
 
                 TerminalBlock(
@@ -339,6 +343,7 @@ private struct DockerCommonCommandCard: View {
                     Label(language.resolved == .zhHans ? "填入转换器" : "Use", systemImage: "arrow.up.left.square")
                 }
                 .buttonStyle(.borderless)
+                .help(language.resolved == .zhHans ? "使用该示例命令" : "Use this sample command")
 
                 Spacer()
 
@@ -348,6 +353,7 @@ private struct DockerCommonCommandCard: View {
                     Label(language.resolved == .zhHans ? "复制 container" : "Copy container", systemImage: "doc.on.doc")
                 }
                 .buttonStyle(.borderedProminent)
+                .help(language.resolved == .zhHans ? "复制 container 命令" : "Copy container command")
             }
         }
         .padding(13)

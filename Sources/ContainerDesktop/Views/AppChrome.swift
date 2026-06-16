@@ -75,6 +75,7 @@ struct AppTopBar: View {
                         .foregroundStyle(.white.opacity(0.72))
                 }
                 .buttonStyle(.plain)
+                .help(language.resolved == .zhHans ? "清空搜索" : "Clear search")
             }
         }
         .padding(.horizontal, 12)
@@ -85,13 +86,22 @@ struct AppTopBar: View {
 
     private var topBarActions: some View {
         HStack(spacing: 6) {
-            TopBarButton(systemImage: isSidebarCollapsed ? "sidebar.left" : "sidebar.leading") {
+            TopBarButton(
+                systemImage: isSidebarCollapsed ? "sidebar.left" : "sidebar.leading",
+                help: isSidebarCollapsed
+                    ? (language.resolved == .zhHans ? "展开侧边栏" : "Expand sidebar")
+                    : (language.resolved == .zhHans ? "收起侧边栏" : "Collapse sidebar")
+            ) {
                 withAnimation(.snappy(duration: 0.18)) {
                     isSidebarCollapsed.toggle()
                 }
             }
 
-            TopBarButton(systemImage: "arrow.clockwise", isLoading: runtimeStore.isRefreshing) {
+            TopBarButton(
+                systemImage: "arrow.clockwise",
+                isLoading: runtimeStore.isRefreshing,
+                help: language.t(.refresh)
+            ) {
                 Task { await runtimeStore.refreshAll() }
             }
 
@@ -101,7 +111,8 @@ struct AppTopBar: View {
             TopBarButton(
                 systemImage: runtimeStore.environment.systemRunning ? "stop.circle" : "play.circle",
                 isLoading: runtimeStore.isOperationActive(systemOperationKey),
-                isDisabled: runtimeStore.busyMessage != nil && !runtimeStore.isOperationActive(systemOperationKey)
+                isDisabled: runtimeStore.busyMessage != nil && !runtimeStore.isOperationActive(systemOperationKey),
+                help: runtimeStore.environment.systemRunning ? language.t(.stopSystem) : language.t(.startSystem)
             ) {
                 Task {
                     if runtimeStore.environment.systemRunning {
@@ -112,7 +123,7 @@ struct AppTopBar: View {
                 }
             }
 
-            TopBarButton(systemImage: "gearshape") {
+            TopBarButton(systemImage: "gearshape", help: language.t(.openSettings)) {
                 ContainerDesktopWindowRouter.openSettings()
             }
         }
@@ -123,6 +134,7 @@ private struct TopBarButton: View {
     var systemImage: String
     var isLoading = false
     var isDisabled = false
+    var help: String
     var action: () -> Void
 
     var body: some View {
@@ -144,6 +156,7 @@ private struct TopBarButton: View {
         .buttonStyle(.plain)
         .disabled(isDisabled || isLoading)
         .opacity(isDisabled ? 0.58 : 1)
+        .help(help)
     }
 }
 

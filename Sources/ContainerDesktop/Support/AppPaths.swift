@@ -35,6 +35,11 @@ enum AppPaths {
             .appending(path: "operation-history.json")
     }
 
+    static var containerStatsHistoryURL: URL {
+        appConfigDirectory
+            .appending(path: "container-stats-history.json")
+    }
+
     static var appUpdateCacheDirectory: URL {
         appConfigDirectory
             .appending(path: "app-update-cache")

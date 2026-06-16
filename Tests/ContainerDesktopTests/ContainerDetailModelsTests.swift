@@ -56,6 +56,51 @@ struct ContainerDetailModelsTests {
         #expect(second.cpuPercent == 25)
     }
 
+    @Test("round trips stats samples through JSON")
+    func roundTripsStatsSamplesThroughJSON() throws {
+        let sample = ContainerStatsSample.make(
+            snapshot: Self.makeStatsSnapshot(id: "c1", cpuUsageUsec: 42, memoryUsageBytes: 256),
+            date: Date(timeIntervalSince1970: 1_781_233_546)
+        )
+
+        let data = try JSONEncoder.containerDesktop.encode(sample)
+        let decoded = try JSONDecoder.containerDesktop.decode(ContainerStatsSample.self, from: data)
+
+        #expect(decoded.id == sample.id)
+        #expect(decoded.date == sample.date)
+        #expect(decoded.snapshot == sample.snapshot)
+        #expect(decoded.cpuPercent == sample.cpuPercent)
+    }
+
+    @Test("finds nearest stats sample by time")
+    func findsNearestStatsSampleByTime() {
+        let samples = [
+            ContainerStatsSample.make(snapshot: Self.makeStatsSnapshot(id: "c1"), date: Date(timeIntervalSince1970: 10)),
+            ContainerStatsSample.make(snapshot: Self.makeStatsSnapshot(id: "c1"), date: Date(timeIntervalSince1970: 20)),
+            ContainerStatsSample.make(snapshot: Self.makeStatsSnapshot(id: "c1"), date: Date(timeIntervalSince1970: 40)),
+        ]
+
+        #expect(samples.nearest(to: Date(timeIntervalSince1970: 19))?.date == Date(timeIntervalSince1970: 20))
+        #expect(samples.nearest(to: Date(timeIntervalSince1970: 31))?.date == Date(timeIntervalSince1970: 40))
+        #expect(samples.nearest(to: Date(timeIntervalSince1970: 25))?.date == Date(timeIntervalSince1970: 20))
+    }
+
+    @Test("downsamples stats samples while keeping endpoints")
+    func downsamplesStatsSamplesWhileKeepingEndpoints() {
+        let samples = (0..<10).map {
+            ContainerStatsSample.make(
+                snapshot: Self.makeStatsSnapshot(id: "c1", cpuUsageUsec: Int64($0)),
+                date: Date(timeIntervalSince1970: TimeInterval($0))
+            )
+        }
+
+        let downsampled = samples.downsampled(maxCount: 4)
+
+        #expect(downsampled.count == 4)
+        #expect(downsampled.first?.date == samples.first?.date)
+        #expect(downsampled.last?.date == samples.last?.date)
+    }
+
     @Test("stops terminal sessions and reports termination")
     func stopsTerminalSession() throws {
         let terminated = LockedValue<Int32?>(nil)
@@ -73,6 +118,30 @@ struct ContainerDetailModelsTests {
 
         #expect(result == .success)
         #expect(terminated.value != nil)
+    }
+
+    private static func makeStatsSnapshot(
+        id: String,
+        blockReadBytes: Int64 = 0,
+        blockWriteBytes: Int64 = 0,
+        cpuUsageUsec: Int64 = 0,
+        memoryLimitBytes: Int64 = 1_000_000_000,
+        memoryUsageBytes: Int64 = 0,
+        networkRxBytes: Int64 = 0,
+        networkTxBytes: Int64 = 0,
+        numProcesses: Int = 1
+    ) -> ContainerStatsSnapshot {
+        ContainerStatsSnapshot(
+            id: id,
+            blockReadBytes: blockReadBytes,
+            blockWriteBytes: blockWriteBytes,
+            cpuUsageUsec: cpuUsageUsec,
+            memoryLimitBytes: memoryLimitBytes,
+            memoryUsageBytes: memoryUsageBytes,
+            networkRxBytes: networkRxBytes,
+            networkTxBytes: networkTxBytes,
+            numProcesses: numProcesses
+        )
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import ContainerDesktop
 
@@ -56,11 +57,101 @@ struct RegistryModelsTests {
 
     @Test("resolves registry browser context")
     func resolvesRegistryBrowserContext() {
-        #expect(RegistrySummary(server: "docker.io").isDockerHubRegistry)
-        #expect(RegistrySummary(server: "registry-1.docker.io").isDockerHubRegistry)
-        #expect(!RegistrySummary(server: "ghcr.io").isDockerHubRegistry)
+        let dockerHub = RegistrySummary(server: "docker.io")
+        let registryV2 = RegistrySummary(server: "ghcr.io")
+
+        #expect(RegistryBrowserContext.context(for: dockerHub) == .dockerHub)
+        #expect(RegistryBrowserContext.context(for: registryV2) == .registryV2(server: "ghcr.io"))
+        #expect(RegistryBrowserContext.dockerHub.isDockerHub)
+        #expect(RegistryBrowserContext.registryV2(server: "ghcr.io").registryServer == "ghcr.io")
         #expect(RegistrySummary(server: "docker.io").registryBrowseServer == "registry-1.docker.io")
-        #expect(RegistrySummary(server: "ghcr.io").registryBrowseServer == "ghcr.io")
+    }
+
+    @Test("resolves registry server endpoints")
+    func resolvesRegistryServerEndpoints() throws {
+        let explicit = try RegistryServerEndpoint.resolve(
+            server: "https://registry.example.com:5000/",
+            fallbackScheme: "http"
+        )
+        let implicit = try RegistryServerEndpoint.resolve(
+            server: "registry.example.com:5000",
+            fallbackScheme: "http"
+        )
+        let url = try implicit.url(
+            path: "/v2/team/app/tags/list",
+            queryItems: [URLQueryItem(name: "n", value: "50")]
+        )
+
+        #expect(explicit.scheme == "https")
+        #expect(explicit.host == "registry.example.com")
+        #expect(explicit.port == 5000)
+        #expect(explicit.server == "registry.example.com:5000")
+        #expect(implicit.scheme == "http")
+        #expect(url.absoluteString == "http://registry.example.com:5000/v2/team/app/tags/list?n=50")
+    }
+
+    @Test("builds keychain lookup descriptor")
+    func buildsKeychainLookupDescriptor() throws {
+        let descriptors = try RegistryKeychainCredentialResolver.lookupDescriptors(
+            server: "https://registry.example.com:5000/",
+            scheme: "http"
+        )
+        let descriptor = try #require(descriptors.first)
+
+        #expect(descriptors.map(\.securityDomain) == [
+            "com.apple.container.registry",
+            nil,
+            "com.apple.containerization",
+        ])
+        #expect(descriptor.securityDomain == "com.apple.container.registry")
+        #expect(descriptor.server == "registry.example.com:5000")
+        #expect(descriptor.itemClass == (kSecClassInternetPassword as String))
+    }
+
+    @Test("keychain lookup omits nil security domain")
+    func keychainLookupOmitsNilSecurityDomain() throws {
+        let descriptors = try RegistryKeychainCredentialResolver.lookupDescriptors(
+            server: "registry.example.com",
+            scheme: "https"
+        )
+        let noDomain = try #require(descriptors.first(where: { $0.securityDomain == nil }))
+        let query = noDomain.keychainQuery(returnData: false)
+
+        #expect(query[kSecClass as String] as? String == (kSecClassInternetPassword as String))
+        #expect(query[kSecAttrServer as String] as? String == "registry.example.com")
+        #expect(query[kSecAttrSecurityDomain as String] == nil)
+        #expect(query[kSecReturnData as String] as? Bool == false)
+    }
+
+    @Test("resolves registry login server input")
+    func resolvesRegistryLoginServerInput() {
+        let preset = RegistryLoginServerSelection(
+            mode: .preset,
+            presetServer: " ghcr.io ",
+            customServer: "registry.example.com"
+        )
+        let custom = RegistryLoginServerSelection(
+            mode: .custom,
+            presetServer: "docker.io",
+            customServer: " registry.example.com:5000 "
+        )
+        let pastedURL = RegistryLoginServerSelection(
+            mode: .custom,
+            presetServer: "docker.io",
+            customServer: "https://registry.example.com/"
+        )
+        let emptyCustom = RegistryLoginServerSelection(
+            mode: .custom,
+            presetServer: "docker.io",
+            customServer: "   "
+        )
+
+        #expect(preset.resolvedServer == "ghcr.io")
+        #expect(preset.canSubmit)
+        #expect(custom.resolvedServer == "registry.example.com:5000")
+        #expect(custom.canSubmit)
+        #expect(pastedURL.resolvedServer == "registry.example.com")
+        #expect(!emptyCustom.canSubmit)
     }
 
     @Test("builds tag detail pull references")
@@ -110,6 +201,21 @@ struct RegistryModelsTests {
         #expect(registryV2.pullReference == "ghcr.io/team/app")
         #expect(registryV2.reference(for: version) == "ghcr.io/team/app:1.0")
         #expect(registryV2.isRegistryV2)
+    }
+
+    @Test("builds registry v2 repository result references")
+    func buildsRegistryV2RepositoryResultReferences() {
+        let result = RegistryV2RepositoryResult(
+            server: "registry.example.com:5000",
+            repository: "team/app",
+            tagCount: 2,
+            hasNextPage: true
+        )
+
+        #expect(result.id == "registry.example.com:5000/team/app")
+        #expect(result.pullReference == "registry.example.com:5000/team/app")
+        #expect(result.tagCount == 2)
+        #expect(result.hasNextPage)
     }
 
     @Test("tracks registry pagination state")

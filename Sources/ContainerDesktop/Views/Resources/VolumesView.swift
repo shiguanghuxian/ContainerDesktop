@@ -162,6 +162,7 @@ struct VolumesView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning)
+                    .help(language.resolved == .zhHans ? "打开创建卷表单" : "Open the create volume form")
                     .sheet(isPresented: $showCreatePopover) {
                         createVolumeForm
                     }
@@ -180,6 +181,7 @@ struct VolumesView: View {
                         }
                     }
                     .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning)
+                    .help(language.resolved == .zhHans ? "清理未使用的卷" : "Prune unused volumes")
                 }
             }
 
@@ -235,21 +237,36 @@ struct VolumesView: View {
                                 .frame(width: 90, alignment: .trailing)
 
                             HStack(spacing: 8) {
-                                RowActionButton(systemImage: "folder") {
+                                RowActionButton(
+                                    systemImage: "folder",
+                                    help: language.resolved == .zhHans ? "打开卷源目录" : "Open volume source"
+                                ) {
                                     openVolumeSource(volume)
                                 }
-                                RowActionButton(systemImage: "plus.square.on.square", isDisabled: isOperationBlocked) {
+                                RowActionButton(
+                                    systemImage: "plus.square.on.square",
+                                    isDisabled: isOperationBlocked,
+                                    help: language.resolved == .zhHans ? "克隆卷" : "Clone volume"
+                                ) {
                                     showCloneSheet(for: volume)
                                 }
-                                DestructiveRowActionButton(systemImage: "eraser", isDisabled: isOperationBlocked) {
+                                DestructiveRowActionButton(
+                                    systemImage: "eraser",
+                                    isDisabled: isOperationBlocked,
+                                    help: language.resolved == .zhHans ? "清空卷" : "Empty volume"
+                                ) {
                                     pendingEmpty = volume
                                 }
-                                RowActionButton(systemImage: "sidebar.right") {
+                                RowActionButton(
+                                    systemImage: "sidebar.right",
+                                    help: language.resolved == .zhHans ? "打开卷概览抽屉" : "Open volume overview drawer"
+                                ) {
                                     selectVolume(volume)
                                 }
                                 DestructiveRowActionButton(
                                     isLoading: runtimeStore.isOperationActive(deleteKey),
-                                    isDisabled: isOperationBlocked && !runtimeStore.isOperationActive(deleteKey)
+                                    isDisabled: isOperationBlocked && !runtimeStore.isOperationActive(deleteKey),
+                                    help: language.resolved == .zhHans ? "删除卷" : "Delete volume"
                                 ) {
                                     pendingDelete = volume
                                 }
@@ -265,6 +282,7 @@ struct VolumesView: View {
                 Task { await runtimeStore.pruneVolumes() }
             }
             .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning)
+            .help(language.resolved == .zhHans ? "清理未使用卷" : "Prune unused volumes")
             Button("取消", role: .cancel) {}
         } message: {
             Text(language.resolved == .zhHans ? "将删除没有容器引用的存储卷。" : "This removes volumes that are not referenced by containers.")
@@ -306,6 +324,7 @@ struct VolumesView: View {
                 Button("取消") {
                     showCreatePopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消创建卷" : "Cancel creating volume")
                 Button(language.t(.create)) {
                     let options = VolumeCreateOptions(
                         name: newVolumeName,
@@ -322,6 +341,7 @@ struct VolumesView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning)
+                .help(language.resolved == .zhHans ? "创建卷" : "Create volume")
             }
         }
         .padding(16)
@@ -541,23 +561,42 @@ private struct VolumeDetailOverview: View {
             }
             .buttonStyle(.plain)
             .disabled(browserStore.isLoading || browserStore.isImportExportRunning || browserStore.isFileOperationRunning)
+            .help(language.resolved == .zhHans ? "新建目录" : "Create folder")
 
-            RowActionButton(systemImage: "arrow.up") {
+            RowActionButton(
+                systemImage: "arrow.up",
+                help: language.resolved == .zhHans ? "返回上一级" : "Go to parent folder"
+            ) {
                 browserStore.goUp()
             }
-            RowActionButton(systemImage: "arrow.clockwise") {
+            RowActionButton(
+                systemImage: "arrow.clockwise",
+                help: language.t(.refresh)
+            ) {
                 onRefreshFiles()
             }
-            RowActionButton(systemImage: "plus.square.on.square") {
+            RowActionButton(
+                systemImage: "plus.square.on.square",
+                help: language.resolved == .zhHans ? "克隆卷" : "Clone volume"
+            ) {
                 onClone()
             }
-            DestructiveRowActionButton(systemImage: "eraser") {
+            DestructiveRowActionButton(
+                systemImage: "eraser",
+                help: language.resolved == .zhHans ? "清空卷" : "Empty volume"
+            ) {
                 onEmpty()
             }
-            RowActionButton(systemImage: "square.and.arrow.up") {
+            RowActionButton(
+                systemImage: "square.and.arrow.up",
+                help: language.resolved == .zhHans ? "导出文件" : "Export files"
+            ) {
                 onExport()
             }
-            RowActionButton(systemImage: "square.and.arrow.down") {
+            RowActionButton(
+                systemImage: "square.and.arrow.down",
+                help: language.resolved == .zhHans ? "导入文件" : "Import files"
+            ) {
                 onImport()
             }
         }
@@ -575,6 +614,7 @@ private struct VolumeDetailOverview: View {
                 Button("取消") {
                     showCreateFolderPopover = false
                 }
+                .help(language.resolved == .zhHans ? "取消新建目录" : "Cancel creating folder")
                 Button(language.t(.create)) {
                     let name = newFolderName
                     newFolderName = ""
@@ -583,6 +623,7 @@ private struct VolumeDetailOverview: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(newFolderName.trimmed.isEmpty || browserStore.isFileOperationRunning)
+                .help(language.resolved == .zhHans ? "创建目录" : "Create folder")
             }
         }
         .padding(16)
@@ -603,6 +644,7 @@ private struct VolumeDetailOverview: View {
                 Button("取消") {
                     renameEntry = nil
                 }
+                .help(language.resolved == .zhHans ? "取消重命名" : "Cancel rename")
                 Button(language.t(.save)) {
                     let newName = renameEntryName
                     renameEntry = nil
@@ -610,6 +652,7 @@ private struct VolumeDetailOverview: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(renameEntryName.trimmed.isEmpty || browserStore.isFileOperationRunning)
+                .help(language.resolved == .zhHans ? "保存新名称" : "Save new name")
             }
         }
         .padding(16)
@@ -617,6 +660,7 @@ private struct VolumeDetailOverview: View {
 }
 
 private struct VolumeFileRow: View {
+    @Environment(\.appLanguage) private var language
     var entry: VolumeFileEntry
     var onOpen: () -> Void
     var onReveal: () -> Void
@@ -644,14 +688,25 @@ private struct VolumeFileRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(entry.isDirectory
+                ? (language.resolved == .zhHans ? "打开目录" : "Open folder")
+                : (language.resolved == .zhHans ? "查看文件" : "View file"))
 
-            RowActionButton(systemImage: "folder") {
+            RowActionButton(
+                systemImage: "folder",
+                help: language.resolved == .zhHans ? "在访达中显示" : "Reveal in Finder"
+            ) {
                 onReveal()
             }
-            RowActionButton(systemImage: "pencil") {
+            RowActionButton(
+                systemImage: "pencil",
+                help: language.resolved == .zhHans ? "重命名" : "Rename"
+            ) {
                 onRename()
             }
-            DestructiveRowActionButton {
+            DestructiveRowActionButton(
+                help: language.resolved == .zhHans ? "删除文件或目录" : "Delete file or folder"
+            ) {
                 onDelete()
             }
         }

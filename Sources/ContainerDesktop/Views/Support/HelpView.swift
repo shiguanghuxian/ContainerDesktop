@@ -16,11 +16,13 @@ struct HelpView: View {
                     Link(destination: URL(string: "https://github.com/apple/container")!) {
                         Label(language.resolved == .zhHans ? "Apple container" : "Apple container", systemImage: "safari")
                     }
+                    .help(localized("打开 Apple container 文档", "Open Apple container docs"))
                     Button {
                         copy("container system status", message: localized("已复制诊断命令", "Diagnostic command copied"))
                     } label: {
                         Label(localized("复制诊断命令", "Copy Diagnostic"), systemImage: "doc.on.doc")
                     }
+                    .help(localized("复制诊断命令", "Copy diagnostic command"))
                 }
             }
 
