@@ -16,11 +16,64 @@ struct RuntimeStoreContainerBatchTests {
         #expect(result.output.contains("web-1"))
         #expect(result.output.contains("api-1"))
         #expect(store.busyMessage == nil)
+        #expect(store.operationFeedback?.phase == .succeeded)
+        #expect(store.operationFeedback?.message == "已启动容器 2 个")
 
         let log = try fake.commandLog()
         #expect(log.contains("start web-1\n"))
         #expect(log.contains("start api-1\n"))
         #expect(log.split(separator: "\n").filter { $0 == "list --all --format json" }.count == 1)
+    }
+
+    @MainActor
+    @Test("operation feedback reports running and success states")
+    func operationFeedbackReportsRunningAndSuccessStates() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        async let operation: Void = store.startContainer("slow-container")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(store.operationFeedback?.phase == .running)
+        #expect(store.operationFeedback?.message == "正在启动容器 slow-container")
+
+        await operation
+
+        #expect(store.operationFeedback?.phase == .succeeded)
+        #expect(store.operationFeedback?.message == "已启动容器 slow-container")
+    }
+
+    @MainActor
+    @Test("operation feedback reports failures and can dismiss")
+    func operationFeedbackReportsFailuresAndDismisses() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        await store.startContainer("missing-container")
+
+        #expect(store.operationFeedback?.phase == .failed)
+        #expect(store.operationFeedback?.message == "启动容器 missing-container失败")
+        #expect(store.errorMessage?.contains("unexpected command") == true)
+
+        store.dismissOperationFeedback()
+
+        #expect(store.operationFeedback == nil)
+    }
+
+    @MainActor
+    @Test("operation feedback replaces previous finished state")
+    func operationFeedbackReplacesPreviousFinishedState() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        await store.startContainer("web-1")
+        let firstID = store.operationFeedback?.id
+
+        await store.stopContainer("api-1")
+
+        #expect(store.operationFeedback?.id != firstID)
+        #expect(store.operationFeedback?.phase == .succeeded)
+        #expect(store.operationFeedback?.message == "已停止容器 api-1")
     }
 
     @MainActor
@@ -313,6 +366,10 @@ private struct FakeBatchContainerCLI {
         case "$*" in
           "start web-1"|"start api-1"|"stop web-1"|"stop api-1")
             echo "ok"
+            ;;
+          "start slow-container")
+            sleep 0.2
+            echo "slow ok"
             ;;
           "run --rm --entrypoint /bin/sh alpine:3.22 -lc test -x /sbin/init")
             echo "ok"

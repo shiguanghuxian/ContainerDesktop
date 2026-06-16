@@ -39,7 +39,7 @@ struct DashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             PageHeader(
-                title: "ContainerDesktop",
+                title: AppBranding.displayName,
                 subtitle: language.t(.dashboardSubtitle),
                 systemImage: "shippingbox.fill"
             ) {

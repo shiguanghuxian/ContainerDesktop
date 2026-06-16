@@ -57,6 +57,7 @@ struct DetailDrawer<Overview: View>: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
         }
         .drawerSurface(width: 430)
     }
@@ -159,6 +160,7 @@ struct DrawerPageLayout<Content: View, Drawer: View>: View {
                         .padding(20)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .thinScrollBars()
                 .frame(width: proxy.size.width, height: proxy.size.height)
 
                 if isDrawerPresented {
@@ -250,5 +252,6 @@ struct PageScrollContainer<Content: View>: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .thinScrollBars()
     }
 }

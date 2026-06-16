@@ -50,10 +50,34 @@ struct AppOperationStoreTests {
         loaded.load()
 
         #expect(loaded.records.count == 2)
-        #expect(loaded.activeCount == 1)
+        #expect(loaded.activeCount == 0)
+        #expect(loaded.records.first?.status == .failed)
+        #expect(loaded.records.first?.finishedAt != nil)
+        #expect(loaded.records.first?.output.contains("任务未完成") == true)
+        #expect(loaded.records.first?.output.contains("container-compose build") == true)
         loaded.clearFinished(domains: [.compose])
-        #expect(loaded.records.count == 1)
-        #expect(loaded.records.first?.status == .running)
+        #expect(loaded.records.isEmpty)
+    }
+
+    @Test("preserves finished records when repairing interrupted operations")
+    @MainActor
+    func preservesFinishedRecordsWhenRepairingInterruptedOperations() {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let store = AppOperationStore(persistenceURL: url, maxRecords: 5)
+        let succeededID = store.start(domain: .image, title: "Pull image", target: "alpine", commandPreview: "container image pull alpine")
+        store.finish(id: succeededID, status: .succeeded, output: "pulled")
+        let failedID = store.start(domain: .compose, title: "Compose up", target: "demo", commandPreview: "container-compose up")
+        store.finish(id: failedID, status: .failed, output: "already failed")
+
+        let loaded = AppOperationStore(persistenceURL: url, maxRecords: 5)
+        loaded.load()
+
+        #expect(loaded.records.count == 2)
+        #expect(loaded.records.map(\.status) == [.failed, .succeeded])
+        #expect(loaded.records.first?.output == "already failed")
+        #expect(loaded.records.last?.output == "pulled")
     }
 
     private func temporaryURL() -> URL {

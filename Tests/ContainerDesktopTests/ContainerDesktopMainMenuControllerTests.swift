@@ -31,8 +31,10 @@ struct ContainerDesktopMainMenuControllerTests {
         )
         ContainerDesktopMainMenuController.shared.configure(snapshot: chineseSnapshot, actions: actions)
 
-        #expect(application.mainMenu?.items.map(\.title) == ["ContainerDesktop", "编辑", "显示", "帮助"])
-        #expect(application.mainMenu?.items[0].submenu?.items.first?.title == "关于 ContainerDesktop")
+        #expect(application.mainMenu?.items.map(\.title) == [AppBranding.displayName, "编辑", "显示", "帮助"])
+        #expect(application.mainMenu?.items[0].submenu?.items.first?.title == "关于 \(AppBranding.displayName)")
+        #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "隐藏 \(AppBranding.displayName)" } != nil)
+        #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "退出 \(AppBranding.displayName)" } != nil)
         #expect(application.mainMenu?.items[0].submenu?.items.first?.target === ContainerDesktopMainMenuController.shared)
         #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "检查更新…" }?.target === ContainerDesktopMainMenuController.shared)
         #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "设置" }?.target === ContainerDesktopMainMenuController.shared)
@@ -98,8 +100,10 @@ struct ContainerDesktopMainMenuControllerTests {
         for index in initialTopItems.indices {
             #expect(application.mainMenu?.items[index] === initialTopItems[index])
         }
-        #expect(application.mainMenu?.items.map(\.title) == ["ContainerDesktop", "Edit", "View", "Help"])
-        #expect(application.mainMenu?.items[0].submenu?.items.first?.title == "About ContainerDesktop")
+        #expect(application.mainMenu?.items.map(\.title) == [AppBranding.displayName, "Edit", "View", "Help"])
+        #expect(application.mainMenu?.items[0].submenu?.items.first?.title == "About \(AppBranding.displayName)")
+        #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "Hide \(AppBranding.displayName)" } != nil)
+        #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "Quit \(AppBranding.displayName)" } != nil)
         #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "Check for Updates..." } != nil)
         #expect(application.mainMenu?.items[0].submenu?.items.first { $0.title == "Settings" } != nil)
 
@@ -176,7 +180,7 @@ struct ContainerDesktopMainMenuControllerTests {
         ContainerDesktopMainMenuController.shared.updateSelectedSection(.images)
 
         #expect(application.mainMenu === initialMainMenu)
-        #expect(application.mainMenu?.items.map(\.title) == ["ContainerDesktop", "编辑", "显示", "帮助"])
+        #expect(application.mainMenu?.items.map(\.title) == [AppBranding.displayName, "编辑", "显示", "帮助"])
         #expect(application.mainMenu?.items[2].submenu === initialViewMenu)
         for index in initialViewItems.indices {
             #expect(application.mainMenu?.items[2].submenu?.items[index] === initialViewItems[index])
@@ -207,7 +211,7 @@ struct ContainerDesktopMainMenuControllerTests {
         ContainerDesktopMainMenuController.shared.configure(snapshot: snapshot, actions: actions)
 
         let systemMenu = NSMenu(title: "SwiftUI Default")
-        for title in ["ContainerDesktop", "Edit", "View", "Window", "Help"] {
+        for title in [AppBranding.displayName, "Edit", "View", "Window", "Help"] {
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.submenu = NSMenu(title: title)
             systemMenu.addItem(item)
@@ -216,7 +220,7 @@ struct ContainerDesktopMainMenuControllerTests {
 
         ContainerDesktopMainMenuController.shared.reinstallMenuIfNeeded()
 
-        #expect(application.mainMenu?.items.map(\.title) == ["ContainerDesktop", "Edit", "View", "Help"])
+        #expect(application.mainMenu?.items.map(\.title) == [AppBranding.displayName, "Edit", "View", "Help"])
         #expect(application.mainMenu?.items[2].submenu?.items.filter { !$0.isSeparatorItem }.map(\.title) == [
             "Refresh",
             "Docker Convert",

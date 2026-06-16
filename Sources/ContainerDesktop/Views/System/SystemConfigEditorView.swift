@@ -83,6 +83,7 @@ struct SystemConfigEditorView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .thinScrollBars()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -230,7 +231,7 @@ struct SystemConfigEditorView: View {
     }
 
     private var generalPane: some View {
-        SettingsGroup(title: language.t(.appSettings), subtitle: "ContainerDesktop") {
+        SettingsGroup(title: language.t(.appSettings), subtitle: AppBranding.displayName) {
             SettingsFormRow(title: language.t(.language), subtitle: "UI language") {
                 ThemedSegmentedPicker(
                     options: AppLanguage.allCases,
@@ -439,7 +440,7 @@ private enum ConfigCategory: String, CaseIterable, Identifiable {
 
     func sidebarSubtitle(language: AppLanguage) -> String {
         switch self {
-        case .general: "ContainerDesktop"
+        case .general: AppBranding.displayName
         case .resources: "[build] [container] [machine]"
         case .network: "[dns] [network]"
         case .registry: "[registry]"

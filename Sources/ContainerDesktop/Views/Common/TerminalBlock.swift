@@ -13,6 +13,7 @@ struct TerminalBlock: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
         }
+        .thinScrollBars()
         .frame(minHeight: minHeight)
         .background(
             LinearGradient(

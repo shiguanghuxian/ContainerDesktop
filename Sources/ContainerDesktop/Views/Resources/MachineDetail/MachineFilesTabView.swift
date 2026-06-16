@@ -1,9 +1,8 @@
-import AppKit
 import SwiftUI
 
-struct ContainerFilesTabView: View {
+struct MachineFilesTabView: View {
     @Environment(\.appLanguage) private var language
-    @Bindable var store: ContainerDetailStore
+    @Bindable var store: MachineDetailStore
     @State private var pathDraft = "/"
     @State private var newFolderName = ""
     @State private var isShowingNewFolder = false
@@ -18,13 +17,16 @@ struct ContainerFilesTabView: View {
             if let error = store.fileError {
                 StatusBanner(text: error, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
             } else if let status = store.fileStatusText {
-                StatusBanner(text: status, systemImage: "checkmark.circle", tint: CDTheme.lime)
+                StatusBanner(text: status, systemImage: status.contains("Root") ? "exclamationmark.triangle" : "checkmark.circle", tint: status.contains("Root") ? CDTheme.ember : CDTheme.lime)
+            } else if store.fileUsesRoot {
+                StatusBanner(text: rootWarningText, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
             }
 
             responsiveFileBrowser
         }
         .onAppear {
             pathDraft = store.filePath
+            Task { await store.loadFilesIfNeeded() }
         }
         .onChange(of: store.filePath) {
             pathDraft = store.filePath
@@ -69,9 +71,15 @@ struct ContainerFilesTabView: View {
         }
     }
 
+    private var rootWarningText: String {
+        language.resolved == .zhHans
+            ? "Root 模式已开启，文件操作将使用管理员权限。"
+            : "Root mode is enabled. File actions will run with administrator privileges."
+    }
+
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 10) {
-            DirectoryBreadcrumb(path: store.filePath) { path in
+            MachineDirectoryBreadcrumb(path: store.filePath) { path in
                 Task { await store.loadFiles(path: path) }
             }
 
@@ -95,6 +103,8 @@ struct ContainerFilesTabView: View {
             Divider()
                 .frame(height: 24)
 
+            rootToggle
+
             searchField
                 .frame(minWidth: 160, idealWidth: 210, maxWidth: 240)
 
@@ -116,16 +126,18 @@ struct ContainerFilesTabView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
+                .disabled(store.isFileLoading)
                 .help(language.t(.refresh))
             }
 
             HStack(spacing: 8) {
+                rootToggle
                 searchField
                     .frame(minWidth: 140, maxWidth: .infinity)
                 sortPicker
                     .frame(width: 120)
                 Spacer(minLength: 0)
-                actionButtonsWithoutRefresh
+                newFolderButton
             }
         }
     }
@@ -137,7 +149,7 @@ struct ContainerFilesTabView: View {
             } label: {
                 Image(systemName: "arrow.up")
             }
-            .disabled(store.filePath == "/")
+            .disabled(store.filePath == "/" || store.isFileLoading)
             .help(language.resolved == .zhHans ? "上一级" : "Parent")
 
             TextField("/", text: $pathDraft)
@@ -152,9 +164,23 @@ struct ContainerFilesTabView: View {
             } label: {
                 Image(systemName: "arrow.right")
             }
+            .disabled(store.isFileLoading)
             .help(language.resolved == .zhHans ? "打开路径" : "Open path")
         }
         .frame(minWidth: 0, maxWidth: .infinity)
+    }
+
+    private var rootToggle: some View {
+        Toggle("Root", isOn: Binding(
+            get: { store.fileUsesRoot },
+            set: { enabled in
+                Task { await store.setFileUsesRoot(enabled) }
+            }
+        ))
+        .toggleStyle(.switch)
+        .disabled(store.isFileLoading || store.isFileSaving)
+        .help(language.resolved == .zhHans ? "使用 Root 权限执行文件操作" : "Run file actions as root")
+        .fixedSize()
     }
 
     private var searchField: some View {
@@ -184,35 +210,27 @@ struct ContainerFilesTabView: View {
 
     private var actionButtons: some View {
         HStack(spacing: 8) {
-            actionButtonsWithoutRefresh
+            newFolderButton
 
             Button {
                 Task { await store.loadFiles(path: store.filePath) }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
+            .disabled(store.isFileLoading)
             .help(language.t(.refresh))
         }
         .fixedSize()
     }
 
-    private var actionButtonsWithoutRefresh: some View {
-        HStack(spacing: 8) {
-            Button {
-                isShowingNewFolder = true
-            } label: {
-                Label(language.resolved == .zhHans ? "新建目录" : "New Folder", systemImage: "folder.badge.plus")
-            }
-            .help(language.resolved == .zhHans ? "新建目录" : "Create folder")
-
-            Button {
-                upload()
-            } label: {
-                Label(language.resolved == .zhHans ? "上传" : "Upload", systemImage: "square.and.arrow.up")
-            }
-            .help(language.resolved == .zhHans ? "上传文件" : "Upload file")
+    private var newFolderButton: some View {
+        Button {
+            isShowingNewFolder = true
+        } label: {
+            Label(language.resolved == .zhHans ? "新建目录" : "New Folder", systemImage: "folder.badge.plus")
         }
-        .fixedSize()
+        .disabled(store.isFileLoading)
+        .help(language.resolved == .zhHans ? "新建目录" : "Create folder")
     }
 
     private var responsiveFileBrowser: some View {
@@ -253,7 +271,7 @@ struct ContainerFilesTabView: View {
                 ResourceTableHeaderLabel(title: language.t(.size), width: 76, alignment: .trailing)
                 ResourceTableHeaderLabel(title: language.t(.modified), width: 118)
                 ResourceTableHeaderLabel(title: language.t(.mode), width: 88)
-                ResourceTableHeaderLabel(title: "", width: 86, alignment: .trailing)
+                ResourceTableHeaderLabel(title: "", width: 56, alignment: .trailing)
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
@@ -328,14 +346,6 @@ struct ContainerFilesTabView: View {
 
             HStack(spacing: 6) {
                 Button {
-                    download(entry)
-                } label: {
-                    Image(systemName: "square.and.arrow.down")
-                }
-                .buttonStyle(.plain)
-                .help(language.resolved == .zhHans ? "下载" : "Download")
-
-                Button {
                     renameName = entry.name
                     renameEntry = entry
                 } label: {
@@ -353,7 +363,7 @@ struct ContainerFilesTabView: View {
                 .foregroundStyle(.red)
                 .help(language.t(.delete))
             }
-            .frame(width: 86, alignment: .trailing)
+            .frame(width: 56, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .frame(height: 42)
@@ -365,9 +375,6 @@ struct ContainerFilesTabView: View {
     private func fileContextMenu(_ entry: ContainerFileEntry) -> some View {
         Button(language.resolved == .zhHans ? "打开" : "Open") {
             Task { await store.openFileEntry(entry) }
-        }
-        Button(language.resolved == .zhHans ? "下载" : "Download") {
-            download(entry)
         }
         Button(language.resolved == .zhHans ? "重命名" : "Rename") {
             renameName = entry.name
@@ -397,7 +404,7 @@ struct ContainerFilesTabView: View {
                 } label: {
                     Label(language.t(.save), systemImage: "square.and.arrow.down")
                 }
-                .disabled(store.selectedFile == nil || store.selectedFile?.isDirectory == true || store.isFileSaving)
+                .disabled(!store.isSelectedFileEditable || store.isFileSaving)
                 .help(language.resolved == .zhHans ? "保存文件修改" : "Save file changes")
             }
 
@@ -409,7 +416,7 @@ struct ContainerFilesTabView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(CDTheme.separator)
                 }
-                .disabled(store.selectedFile == nil || store.selectedFile?.isDirectory == true)
+                .disabled(!store.isSelectedFileEditable || store.isFileSaving)
         }
         .padding(12)
         .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
@@ -439,27 +446,9 @@ struct ContainerFilesTabView: View {
         }
         .padding(18)
     }
-
-    private func upload() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await store.upload(localURL: url) }
-        }
-    }
-
-    private func download(_ entry: ContainerFileEntry) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = entry.name
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await store.download(entry, to: url) }
-        }
-    }
 }
 
-private struct DirectoryBreadcrumb: View {
+private struct MachineDirectoryBreadcrumb: View {
     @Environment(\.appLanguage) private var language
     var path: String
     var onSelect: (String) -> Void

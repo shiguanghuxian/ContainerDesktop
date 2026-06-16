@@ -18,7 +18,7 @@ enum ContainerDesktopMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    private static let mainWindowTitle = "ContainerDesktop"
+    private static let mainWindowTitle = AppBranding.displayName
 
     private let runtimeStore = RuntimeStore()
     private let composeStore = ComposeProjectStore()
@@ -274,17 +274,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private var statusItemDescription: String {
+        let name = AppBranding.displayName
         if !runtimeStore.environment.containerAvailable {
-            return language.resolved == .zhHans ? "ContainerDesktop：container CLI 缺失" : "ContainerDesktop: container CLI missing"
+            return language.resolved == .zhHans ? "\(name)：container CLI 缺失" : "\(name): container CLI missing"
         }
         if !runtimeStore.environment.systemRunning {
-            return language.resolved == .zhHans ? "ContainerDesktop：container system 未运行" : "ContainerDesktop: container system stopped"
+            return language.resolved == .zhHans ? "\(name)：container system 未运行" : "\(name): container system stopped"
         }
         if operationStore.activeCount > 0 {
-            return language.resolved == .zhHans ? "ContainerDesktop：\(operationStore.activeCount) 个任务运行中" : "ContainerDesktop: \(operationStore.activeCount) tasks running"
+            return language.resolved == .zhHans ? "\(name)：\(operationStore.activeCount) 个任务运行中" : "\(name): \(operationStore.activeCount) tasks running"
         }
         let runningContainers = runtimeStore.containers.filter { $0.state == "running" }.count
-        return language.resolved == .zhHans ? "ContainerDesktop：\(runningContainers) 个容器运行中" : "ContainerDesktop: \(runningContainers) containers running"
+        return language.resolved == .zhHans ? "\(name)：\(runningContainers) 个容器运行中" : "\(name): \(runningContainers) containers running"
     }
 
     private func mainRootView() -> AnyView {

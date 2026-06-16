@@ -49,6 +49,7 @@ struct ImageLayersTabView: View {
                     }
                     .frame(minWidth: 980, alignment: .leading)
                 }
+                .thinScrollBars()
                 .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8)

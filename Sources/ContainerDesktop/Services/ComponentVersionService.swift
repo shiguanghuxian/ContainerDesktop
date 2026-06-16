@@ -5,37 +5,33 @@ protocol ComponentVersionChecking: Sendable {
 }
 
 enum ComponentVersionServiceError: LocalizedError, Hashable {
-    case invalidHTTPStatus(Int, String)
-    case invalidGitHubRelease
-    case invalidHomebrewFormula
+    case invalidHTTPStatus(Int, URL)
+    case invalidHomebrewFormula(String)
 
     var errorDescription: String? {
         switch self {
-        case .invalidHTTPStatus(let statusCode, let detail):
-            let suffix = detail.trimmed.isEmpty ? "" : " \(detail)"
-            return "Version server returned HTTP \(statusCode).\(suffix)"
-        case .invalidGitHubRelease:
-            return "The apple/container release response is invalid."
-        case .invalidHomebrewFormula:
-            return "The container-compose Homebrew formula response is invalid."
+        case .invalidHTTPStatus(let statusCode, let url):
+            return "Version server returned HTTP \(statusCode) for \(url.host ?? url.absoluteString)."
+        case .invalidHomebrewFormula(let name):
+            return "The \(name) Homebrew formula response is invalid."
         }
     }
 }
 
 struct ComponentVersionService: ComponentVersionChecking, @unchecked Sendable {
-    static let defaultContainerReleaseURL = URL(string: "https://api.github.com/repos/apple/container/releases/latest")!
+    static let defaultContainerFormulaURL = URL(string: "https://formulae.brew.sh/api/formula/container.json")!
     static let defaultContainerComposeFormulaURL = URL(string: "https://formulae.brew.sh/api/formula/container-compose.json")!
 
-    private let containerReleaseURL: URL
+    private let containerFormulaURL: URL
     private let containerComposeFormulaURL: URL
     private let session: URLSession
 
     init(
-        containerReleaseURL: URL = Self.defaultContainerReleaseURL,
+        containerFormulaURL: URL = Self.defaultContainerFormulaURL,
         containerComposeFormulaURL: URL = Self.defaultContainerComposeFormulaURL,
         session: URLSession = URLSession(configuration: .ephemeral)
     ) {
-        self.containerReleaseURL = containerReleaseURL
+        self.containerFormulaURL = containerFormulaURL
         self.containerComposeFormulaURL = containerComposeFormulaURL
         self.session = session
     }
@@ -61,32 +57,29 @@ struct ComponentVersionService: ComponentVersionChecking, @unchecked Sendable {
     }
 
     func fetchContainerLatestVersion() async throws -> ComponentLatestVersion {
-        struct GitHubReleaseResponse: Decodable {
-            var tagName: String?
-            var htmlURL: URL?
-
-            enum CodingKeys: String, CodingKey {
-                case tagName = "tag_name"
-                case htmlURL = "html_url"
-            }
-        }
-
-        let data = try await fetchData(from: containerReleaseURL)
-        let release = try JSONDecoder().decode(GitHubReleaseResponse.self, from: data)
-        guard let rawVersion = release.tagName?.nilIfBlank,
-              let version = ComponentVersionParser.displayVersion(from: rawVersion)
-        else {
-            throw ComponentVersionServiceError.invalidGitHubRelease
-        }
-        return ComponentLatestVersion(
+        try await fetchHomebrewFormulaLatestVersion(
             componentID: ComponentVersionIDs.container,
-            version: version,
-            releaseURL: release.htmlURL ?? URL(string: "https://github.com/apple/container/releases/latest"),
-            sourceName: "GitHub releases"
+            formulaName: "container",
+            url: containerFormulaURL,
+            fallbackURL: URL(string: "https://formulae.brew.sh/formula/container")
         )
     }
 
     func fetchContainerComposeLatestVersion() async throws -> ComponentLatestVersion {
+        try await fetchHomebrewFormulaLatestVersion(
+            componentID: ComponentVersionIDs.containerCompose,
+            formulaName: "container-compose",
+            url: containerComposeFormulaURL,
+            fallbackURL: URL(string: "https://formulae.brew.sh/formula/container-compose")
+        )
+    }
+
+    private func fetchHomebrewFormulaLatestVersion(
+        componentID: String,
+        formulaName: String,
+        url: URL,
+        fallbackURL: URL?
+    ) async throws -> ComponentLatestVersion {
         struct HomebrewFormulaResponse: Decodable {
             struct Versions: Decodable {
                 var stable: String?
@@ -96,17 +89,17 @@ struct ComponentVersionService: ComponentVersionChecking, @unchecked Sendable {
             var homepage: URL?
         }
 
-        let data = try await fetchData(from: containerComposeFormulaURL)
+        let data = try await fetchData(from: url)
         let formula = try JSONDecoder().decode(HomebrewFormulaResponse.self, from: data)
         guard let rawVersion = formula.versions.stable?.nilIfBlank,
               let version = ComponentVersionParser.displayVersion(from: rawVersion)
         else {
-            throw ComponentVersionServiceError.invalidHomebrewFormula
+            throw ComponentVersionServiceError.invalidHomebrewFormula(formulaName)
         }
         return ComponentLatestVersion(
-            componentID: ComponentVersionIDs.containerCompose,
+            componentID: componentID,
             version: version,
-            releaseURL: formula.homepage ?? URL(string: "https://formulae.brew.sh/formula/container-compose"),
+            releaseURL: formula.homepage ?? fallbackURL,
             sourceName: "Homebrew formula"
         )
     }
@@ -119,15 +112,11 @@ struct ComponentVersionService: ComponentVersionChecking, @unchecked Sendable {
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw ComponentVersionServiceError.invalidHTTPStatus(-1, "")
+            throw ComponentVersionServiceError.invalidHTTPStatus(-1, url)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw ComponentVersionServiceError.invalidHTTPStatus(httpResponse.statusCode, Self.responseMessage(from: data))
+            throw ComponentVersionServiceError.invalidHTTPStatus(httpResponse.statusCode, url)
         }
         return data
-    }
-
-    private static func responseMessage(from data: Data) -> String {
-        String(data: data.prefix(240), encoding: .utf8)?.trimmed ?? ""
     }
 }

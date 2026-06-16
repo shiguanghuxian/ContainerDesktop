@@ -42,6 +42,7 @@ struct ReadOnlyMonospaceTextView: NSViewRepresentable {
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = appearance.backgroundColor
+        scrollView.applyContainerDesktopThinScrollBars()
 
         let textView = NSTextView()
         textView.minSize = NSSize(width: 0, height: 0)
@@ -76,6 +77,7 @@ struct ReadOnlyMonospaceTextView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         nsView.hasHorizontalScroller = !wrapsLines
         nsView.backgroundColor = appearance.backgroundColor
+        nsView.applyContainerDesktopThinScrollBars()
         guard let textView = context.coordinator.textView else { return }
 
         textView.backgroundColor = appearance.backgroundColor

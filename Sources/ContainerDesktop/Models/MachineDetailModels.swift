@@ -4,6 +4,7 @@ enum MachineDetailTab: String, CaseIterable, Identifiable, Hashable {
     case overview
     case logs
     case inspect
+    case files
     case exec
     case run
     case settings
@@ -18,6 +19,8 @@ enum MachineDetailTab: String, CaseIterable, Identifiable, Hashable {
             language.t(.logs)
         case .inspect:
             "Inspect"
+        case .files:
+            "Files"
         case .exec:
             "Exec"
         case .run:
@@ -32,6 +35,7 @@ enum MachineDetailTab: String, CaseIterable, Identifiable, Hashable {
         case .overview: "rectangle.grid.2x2"
         case .logs: "doc.plaintext"
         case .inspect: "curlybraces"
+        case .files: "folder"
         case .exec: "terminal"
         case .run: "play.rectangle"
         case .settings: "slider.horizontal.3"

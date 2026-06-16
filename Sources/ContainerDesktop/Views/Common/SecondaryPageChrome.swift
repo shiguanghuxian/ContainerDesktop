@@ -12,6 +12,7 @@ struct SecondaryDetailPageContainer<Content: View>: View {
                     .padding(.bottom, 20)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .thinScrollBars()
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .navigationBarBackButtonHidden(true)

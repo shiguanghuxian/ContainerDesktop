@@ -18,7 +18,7 @@ enum SystemTerminalLauncher {
             body: """
             #!/bin/zsh
             clear
-            printf '%s\\n\\n' \(ShellEscaper.singleQuoted("ContainerDesktop - Container \(id)"))
+            printf '%s\\n\\n' \(ShellEscaper.singleQuoted("\(AppBranding.displayName) - Container \(id)"))
             if ! command -v container >/dev/null 2>&1; then
               echo "container CLI was not found in this terminal session."
               echo "Press Return to close."
@@ -36,7 +36,7 @@ enum SystemTerminalLauncher {
             body: """
             #!/bin/zsh
             clear
-            printf '%s\\n\\n' \(ShellEscaper.singleQuoted("ContainerDesktop - Machine \(id)"))
+            printf '%s\\n\\n' \(ShellEscaper.singleQuoted("\(AppBranding.displayName) - Machine \(id)"))
             if ! command -v container >/dev/null 2>&1; then
               echo "container CLI was not found in this terminal session."
               echo "Press Return to close."
@@ -65,7 +65,7 @@ enum SystemTerminalLauncher {
           printf '    %s\\n' "$1"
         }
 
-        print_step "ContainerDesktop dependency installer"
+        print_step "\(AppBranding.displayName) dependency installer"
         print_note "This script only installs components that were missing when it was generated."
         print_note "Keep this Terminal window open so you can approve installer or Homebrew prompts."
 
@@ -86,7 +86,7 @@ enum SystemTerminalLauncher {
           print_note "container-compose is still not available in PATH."
         fi
 
-        printf '\\nReturn to ContainerDesktop and click Refresh.\\n'
+        printf '\\nReturn to \(AppBranding.displayName) and click Refresh.\\n'
         printf 'Press Return to close.\\n'
         read
         """

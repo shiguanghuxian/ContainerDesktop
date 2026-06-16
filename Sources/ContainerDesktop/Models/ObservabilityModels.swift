@@ -147,7 +147,7 @@ enum ObservabilityComposeScope: Hashable, Identifiable, Sendable {
 
 enum GlobalLogStreamFormatter {
     static func prefixSystem(chunk: String) -> String {
-        let prefix = "[ContainerDesktop]"
+        let prefix = AppBranding.logPrefix
         return chunk
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { line in
@@ -199,7 +199,7 @@ enum GlobalLogStreamFormatter {
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
             .filter { line in
-                line.hasPrefix("[ContainerDesktop]") || allPrefixes.contains { line.hasPrefix($0) }
+                line.hasPrefix(AppBranding.logPrefix) || line.hasPrefix(AppBranding.legacyLogPrefix) || allPrefixes.contains { line.hasPrefix($0) }
             }
             .joined(separator: "\n")
     }

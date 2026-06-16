@@ -37,6 +37,7 @@ struct ImageTasksDrawer: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
         }
         .drawerSurface(width: 620)
     }

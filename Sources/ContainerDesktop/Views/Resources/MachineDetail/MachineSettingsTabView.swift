@@ -29,5 +29,6 @@ struct MachineSettingsTabView: View {
             .padding(1)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .thinScrollBars()
     }
 }

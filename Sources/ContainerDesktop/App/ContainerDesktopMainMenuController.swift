@@ -33,14 +33,15 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
 
     init(language: AppLanguage, selectedSection: AppSection) {
         let isChinese = language.resolved == .zhHans
-        appMenuTitle = "ContainerDesktop"
-        aboutApp = isChinese ? "关于 ContainerDesktop" : "About ContainerDesktop"
+        let appName = AppBranding.displayName
+        appMenuTitle = appName
+        aboutApp = isChinese ? "关于 \(appName)" : "About \(appName)"
         checkForUpdates = isChinese ? "检查更新…" : "Check for Updates..."
         settings = language.t(.settings)
-        hideApp = isChinese ? "隐藏 ContainerDesktop" : "Hide ContainerDesktop"
+        hideApp = isChinese ? "隐藏 \(appName)" : "Hide \(appName)"
         hideOthers = isChinese ? "隐藏其他" : "Hide Others"
         showAll = isChinese ? "全部显示" : "Show All"
-        quit = isChinese ? "退出 ContainerDesktop" : "Quit ContainerDesktop"
+        quit = isChinese ? "退出 \(appName)" : "Quit \(appName)"
         editMenuTitle = isChinese ? "编辑" : "Edit"
         viewMenuTitle = isChinese ? "显示" : "View"
         helpMenuTitle = language.t(.help)

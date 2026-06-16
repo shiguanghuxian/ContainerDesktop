@@ -3,7 +3,7 @@ import Foundation
 enum CommandRunnerError: LocalizedError, Sendable {
     case executableNotFound(String)
     case timeout(String)
-    case nonZeroExit(code: Int32, stderr: String, command: String)
+    case nonZeroExit(code: Int32, stdout: String, stderr: String, command: String)
 
     var errorDescription: String? {
         switch self {
@@ -11,12 +11,15 @@ enum CommandRunnerError: LocalizedError, Sendable {
             return "未找到可执行文件：\(executable)"
         case .timeout(let command):
             return "命令超时：\(command)"
-        case .nonZeroExit(let code, let stderr, let command):
-            let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
+        case .nonZeroExit(let code, let stdout, let stderr, let command):
+            let output = [stdout, stderr]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            if output.isEmpty {
                 return "命令失败（退出码 \(code)）：\(command)"
             }
-            return "命令失败（退出码 \(code)）：\(command)\n\(trimmed)"
+            return "命令失败（退出码 \(code)）\n\(output)\n命令：\(command)"
         }
     }
 }
@@ -170,6 +173,7 @@ actor CommandRunner {
             if process.terminationStatus != 0 {
                 throw CommandRunnerError.nonZeroExit(
                     code: result.exitCode,
+                    stdout: result.stdout,
                     stderr: result.stderr,
                     command: ([resolved] + arguments).joinedCommand
                 )

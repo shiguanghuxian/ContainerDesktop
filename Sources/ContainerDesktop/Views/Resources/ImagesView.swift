@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum ImageDrawerSelection: Equatable {
+    case tasks
+    case image(String)
+}
+
 struct ImagesView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
@@ -51,7 +56,8 @@ struct ImagesView: View {
     @State private var saveArch = ""
     @State private var loadInputPath = ""
     @State private var loadForce = false
-    @State private var showTasksDrawer = false
+    @State private var drawerSelection: ImageDrawerSelection?
+    @State private var drawerMode: DetailDrawerMode = .overview
 
     private var filteredImages: [ImageSummary] {
         let query = searchText.trimmed.lowercased()
@@ -64,6 +70,26 @@ struct ImagesView: View {
     private var detailImage: ImageSummary? {
         guard let detailReference else { return nil }
         return runtimeStore.images.first { $0.reference == detailReference }
+    }
+
+    private var drawerImage: ImageSummary? {
+        guard case let .image(reference) = drawerSelection else { return nil }
+        return runtimeStore.images.first { $0.reference == reference }
+    }
+
+    private var isDrawerPresented: Bool {
+        switch drawerSelection {
+        case .tasks:
+            true
+        case .image:
+            drawerImage != nil
+        case nil:
+            false
+        }
+    }
+
+    private var drawerWidth: CGFloat {
+        drawerSelection == .tasks ? 620 : 430
     }
 
     private var pullChoices: [String] {
@@ -85,22 +111,26 @@ struct ImagesView: View {
                         get: { detailReference != nil },
                         set: { if !$0 { closeDetail() } }
                     ),
-                    showTasksDrawer: $showTasksDrawer
+                    showTasksDrawer: Binding(
+                        get: { drawerSelection == .tasks },
+                        set: { isPresented in
+                            if isPresented {
+                                drawerSelection = .tasks
+                            } else if drawerSelection == .tasks {
+                                drawerSelection = nil
+                            }
+                        }
+                    )
                 )
             } else {
                 DrawerPageLayout(
-                    isDrawerPresented: showTasksDrawer,
-                    onDismiss: closeTasksDrawer,
-                    drawerWidth: 620
+                    isDrawerPresented: isDrawerPresented,
+                    onDismiss: closeDrawer,
+                    drawerWidth: drawerWidth
                 ) {
                     pageContent
                 } drawer: {
-                    ImageTasksDrawer(
-                        operationStore: operationStore,
-                        statusMessage: runtimeStore.imageOperationStatusMessage,
-                        statusIsError: runtimeStore.imageOperationStatusIsError,
-                        onClose: closeTasksDrawer
-                    )
+                    drawerContent
                 }
             }
         }
@@ -208,7 +238,7 @@ struct ImagesView: View {
                     imageHeader
                 } rows: {
                     ForEach(filteredImages) { image in
-                        ResourceTableRow(isSelected: detailReference == image.reference) {
+                        ResourceTableRow(isSelected: detailReference == image.reference || drawerImage?.reference == image.reference) {
                             let deleteKey = RuntimeOperationKey.imageDelete(image.reference)
                             let isOperationBlocked = runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning
                             ResourceStatusDot(tint: image.variants.isEmpty ? .secondary : CDTheme.lime, isHollow: image.variants.isEmpty)
@@ -247,9 +277,9 @@ struct ImagesView: View {
                             HStack(spacing: 8) {
                                 RowActionButton(
                                     systemImage: "sidebar.right",
-                                    help: language.resolved == .zhHans ? "打开镜像详情" : "Open image details"
+                                    help: language.resolved == .zhHans ? "打开镜像概览抽屉" : "Open image overview drawer"
                                 ) {
-                                    selectImage(image)
+                                    openImageDrawer(image)
                                 }
                                 ImageRowMoreMenu(isDisabled: isOperationBlocked) {
                                     tagSource = image.reference
@@ -296,21 +326,62 @@ struct ImagesView: View {
     }
 
     private func selectImage(_ image: ImageSummary) {
-        showTasksDrawer = false
+        drawerSelection = nil
         detailReference = image.reference
     }
 
+    private func openImageDrawer(_ image: ImageSummary) {
+        drawerSelection = .image(image.reference)
+        drawerMode = .overview
+    }
+
     private func openTasksDrawer() {
-        showTasksDrawer = true
+        drawerSelection = .tasks
     }
 
     private func closeDetail() {
         detailReference = nil
-        showTasksDrawer = false
+        drawerSelection = nil
     }
 
-    private func closeTasksDrawer() {
-        showTasksDrawer = false
+    private func closeDrawer() {
+        drawerSelection = nil
+    }
+
+    @ViewBuilder
+    private var drawerContent: some View {
+        switch drawerSelection {
+        case .tasks:
+            ImageTasksDrawer(
+                operationStore: operationStore,
+                statusMessage: runtimeStore.imageOperationStatusMessage,
+                statusIsError: runtimeStore.imageOperationStatusIsError,
+                onClose: closeDrawer
+            )
+        case .image:
+            if let drawerImage {
+                DetailDrawer(
+                    mode: $drawerMode,
+                    title: drawerImage.reference,
+                    subtitle: drawerImage.sizeDisplay,
+                    systemImage: "photo.stack",
+                    rawText: imageRawSummary(drawerImage),
+                    onClose: closeDrawer
+                ) {
+                    ImageDrawerOverview(image: drawerImage)
+                }
+            }
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func imageRawSummary(_ image: ImageSummary) -> String {
+        guard let data = try? JSONEncoder.containerDesktop.encode(image),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
     }
 
     private var currentPullReference: String {
@@ -823,6 +894,46 @@ struct ImagesView: View {
             .split(whereSeparator: \.isNewline)
             .map { String($0).trimmed }
             .filter { !$0.isEmpty }
+    }
+}
+
+private struct ImageDrawerOverview: View {
+    @Environment(\.appLanguage) private var language
+    var image: ImageSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            DetailSection(title: language.resolved == .zhHans ? "镜像" : "Image") {
+                DetailInfoCard {
+                    DetailInfoRow(title: language.t(.name), value: image.reference)
+                    DetailInfoRow(title: language.t(.tag), value: image.tag)
+                    DetailInfoRow(title: language.t(.imageID), value: image.id, monospaced: true)
+                    DetailInfoRow(title: "Digest", value: image.digest, monospaced: true)
+                    DetailInfoRow(title: language.t(.created), value: image.createdText)
+                    DetailInfoRow(title: language.t(.size), value: image.sizeDisplay)
+                }
+            }
+
+            DetailSection(title: language.resolved == .zhHans ? "平台变体" : "Platform variants") {
+                DetailInfoCard {
+                    DetailInfoRow(
+                        title: language.resolved == .zhHans ? "数量" : "Count",
+                        value: "\(image.variants.count)"
+                    )
+
+                    if image.variants.isEmpty {
+                        DetailInfoRow(title: "Platforms", value: "—")
+                    } else {
+                        ForEach(image.variants, id: \.digest) { variant in
+                            DetailInfoRow(
+                                title: variant.platformText,
+                                value: variant.sizeDisplay
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

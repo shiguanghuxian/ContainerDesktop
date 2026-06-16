@@ -19,9 +19,9 @@ enum AppUpdateInstallerError: LocalizedError, Hashable {
         case .currentAppNotWritable(let path):
             return "The app cannot be updated in place because its folder is not writable: \(path)"
         case .invalidPackage:
-            return "The downloaded update package is not a valid ContainerDesktop zip archive."
+            return "The downloaded update package is not a valid \(AppBranding.displayName) zip archive."
         case .extractedAppNotFound:
-            return "The update package did not contain ContainerDesktop.app."
+            return "The update package did not contain the expected \(AppBranding.displayName) app bundle."
         case .multipleExtractedApps:
             return "The update package contained more than one app bundle."
         case .invalidBundleIdentifier(let value):
@@ -210,7 +210,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         done
 
         if [[ ! -d "$NEW_APP" ]]; then
-          /usr/bin/osascript -e 'display alert "ContainerDesktop update failed" message "The downloaded update did not contain the new app."' >/dev/null 2>&1 || true
+          /usr/bin/osascript -e 'display alert "\(AppBranding.displayName) update failed" message "The downloaded update did not contain the new app."' >/dev/null 2>&1 || true
           exit 1
         fi
 
@@ -230,7 +230,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
           /bin/mv "$BACKUP_APP" "$CURRENT_APP"
           /usr/bin/open "$CURRENT_APP"
         fi
-        /usr/bin/osascript -e 'display alert "ContainerDesktop update failed" message "The old version was restored after replacement failed."' >/dev/null 2>&1 || true
+        /usr/bin/osascript -e 'display alert "\(AppBranding.displayName) update failed" message "The old version was restored after replacement failed."' >/dev/null 2>&1 || true
         exit 1
         """
         guard let data = script.data(using: .utf8) else {

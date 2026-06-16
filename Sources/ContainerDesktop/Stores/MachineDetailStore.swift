@@ -33,9 +33,34 @@ final class MachineDetailStore {
     var terminalResetSequence = 0
     var terminalState: TerminalSessionState = .disconnected
 
+    var filePath = "/"
+    var fileEntries: [ContainerFileEntry] = []
+    var fileSearchText = ""
+    var fileSort: ContainerFileSort = .name
+    var selectedFile: ContainerFileEntry?
+    var isSelectedFileEditable = false
+    var filePreviewText = ""
+    var fileStatusText: String?
+    var fileError: String?
+    var isFileLoading = false
+    var isFileSaving = false
+    var fileUsesRoot = false
+    private var hasLoadedFiles = false
+
     init(machineID: String, client: ContainerCLIClient = ContainerCLIClient()) {
         self.machineID = machineID
         self.client = client
+    }
+
+    var filteredFileEntries: [ContainerFileEntry] {
+        let query = fileSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let entries = fileEntries.sorted(by: fileSort)
+        guard !query.isEmpty else { return entries }
+        return entries.filter {
+            $0.name.lowercased().contains(query)
+                || $0.path.lowercased().contains(query)
+                || $0.mode.lowercased().contains(query)
+        }
     }
 
     var filteredLogsText: String {
@@ -122,6 +147,143 @@ final class MachineDetailStore {
         commandError = nil
     }
 
+    func loadFilesIfNeeded() async {
+        guard !hasLoadedFiles, !isFileLoading else { return }
+        await loadFiles(path: filePath)
+    }
+
+    func setFileUsesRoot(_ enabled: Bool) async {
+        guard fileUsesRoot != enabled else { return }
+        fileUsesRoot = enabled
+        selectedFile = nil
+        isSelectedFileEditable = false
+        filePreviewText = ""
+        fileStatusText = enabled ? "Root 模式已开启，文件操作将使用管理员权限。" : nil
+        fileError = nil
+        if hasLoadedFiles {
+            await loadFiles(path: filePath)
+        }
+    }
+
+    func loadFiles(path: String? = nil) async {
+        let targetPath = normalizeDirectory(path ?? filePath)
+        isFileLoading = true
+        fileError = nil
+        fileStatusText = fileUsesRoot ? "Root 模式已开启，文件操作将使用管理员权限。" : nil
+        defer { isFileLoading = false }
+        do {
+            fileEntries = try await client.listMachineFiles(id: machineID, path: targetPath, asRoot: fileUsesRoot)
+            filePath = targetPath
+            selectedFile = nil
+            isSelectedFileEditable = false
+            filePreviewText = ""
+            hasLoadedFiles = true
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    func openFileEntry(_ entry: ContainerFileEntry) async {
+        if entry.isDirectory {
+            await loadFiles(path: entry.path)
+            return
+        }
+        selectedFile = entry
+        isSelectedFileEditable = false
+        filePreviewText = ""
+        fileError = nil
+
+        guard entry.kind.isPreviewableFile else {
+            fileStatusText = "该文件类型暂不支持预览。"
+            return
+        }
+        guard entry.size <= 1_000_000 else {
+            fileStatusText = "文件超过 1 MB，默认不预览。"
+            return
+        }
+
+        do {
+            filePreviewText = try await client.machineFileContent(id: machineID, path: entry.path, asRoot: fileUsesRoot)
+            isSelectedFileEditable = true
+            fileStatusText = fileUsesRoot ? "Root 模式已开启，文件操作将使用管理员权限。" : nil
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    func saveSelectedFile() async {
+        guard let selectedFile else { return }
+        guard isSelectedFileEditable else { return }
+        isFileSaving = true
+        fileError = nil
+        defer { isFileSaving = false }
+        do {
+            try await client.writeMachineFile(
+                id: machineID,
+                path: selectedFile.path,
+                contents: filePreviewText,
+                asRoot: fileUsesRoot
+            )
+            fileStatusText = "已保存 \(selectedFile.name)"
+            await loadFiles(path: filePath)
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    func createDirectory(name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await client.createMachineDirectory(
+                id: machineID,
+                path: childPath(trimmed, in: filePath),
+                asRoot: fileUsesRoot
+            )
+            fileStatusText = "已创建目录 \(trimmed)"
+            await loadFiles(path: filePath)
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    func rename(_ entry: ContainerFileEntry, to newName: String) async {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != entry.name else { return }
+        do {
+            try await client.renameMachinePath(
+                id: machineID,
+                source: entry.path,
+                destination: childPath(trimmed, in: parentPath(of: entry.path)),
+                asRoot: fileUsesRoot
+            )
+            fileStatusText = "已重命名为 \(trimmed)"
+            await loadFiles(path: filePath)
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    func delete(_ entry: ContainerFileEntry) async {
+        do {
+            try await client.deleteMachinePath(id: machineID, path: entry.path, asRoot: fileUsesRoot)
+            fileStatusText = "已删除 \(entry.name)"
+            if selectedFile?.path == entry.path {
+                selectedFile = nil
+                isSelectedFileEditable = false
+                filePreviewText = ""
+            }
+            await loadFiles(path: filePath)
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    func goToParentDirectory() async {
+        guard filePath != "/" else { return }
+        await loadFiles(path: parentPath(of: filePath))
+    }
+
     func startTerminal() async {
         guard !terminalState.isConnected else { return }
         stopTerminal()
@@ -191,6 +353,32 @@ final class MachineDetailStore {
         if terminalText.count > maxTerminalCharacters {
             terminalText.removeFirst(terminalText.count - maxTerminalCharacters)
         }
+    }
+
+    private func normalizeDirectory(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "/" }
+        if trimmed == "/" { return "/" }
+        let withLeadingSlash = trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+        return String(withLeadingSlash.drop(while: { $0 == "/" })).isEmpty
+            ? "/"
+            : "/" + withLeadingSlash.split(separator: "/").joined(separator: "/")
+    }
+
+    private func childPath(_ name: String, in directory: String) -> String {
+        let cleanName = name.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if directory == "/" {
+            return "/\(cleanName)"
+        }
+        return "\(directory)/\(cleanName)"
+    }
+
+    private func parentPath(of path: String) -> String {
+        let normalized = normalizeDirectory(path)
+        guard normalized != "/" else { return "/" }
+        let url = URL(fileURLWithPath: normalized)
+        let parent = url.deletingLastPathComponent().path
+        return parent.isEmpty ? "/" : parent
     }
 
     deinit {

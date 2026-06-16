@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class AppOperationStore {
+    private static let interruptedOperationMessage = "应用上次退出前任务未完成，命令已中断，请重新执行。"
+
     private let persistenceURL: URL
     private let maxRecords: Int
 
@@ -30,9 +32,17 @@ final class AppOperationStore {
 
         do {
             let data = try Data(contentsOf: persistenceURL)
+            var repairedInterruptedRecords = false
             records = try JSONDecoder.containerDesktop.decode([AppOperationRecord].self, from: data)
                 .prefix(maxRecords)
-                .map { $0 }
+                .map { record in
+                    guard record.status == .running else { return record }
+                    repairedInterruptedRecords = true
+                    return Self.interruptedRecord(from: record)
+                }
+            if repairedInterruptedRecords {
+                persist()
+            }
         } catch {
             errorMessage = error.localizedDescription
             records = []
@@ -105,5 +115,21 @@ final class AppOperationStore {
         let maxCharacters = 40_000
         guard output.count > maxCharacters else { return output }
         return String(output.suffix(maxCharacters))
+    }
+
+    private static func interruptedRecord(from record: AppOperationRecord) -> AppOperationRecord {
+        var record = record
+        record.status = .failed
+        record.finishedAt = Date()
+
+        let interruptionText = [interruptedOperationMessage, record.commandPreview]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let existingOutput = record.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.output = existingOutput.isEmpty
+            ? interruptionText
+            : "\(existingOutput)\n\n\(interruptionText)"
+        return record
     }
 }

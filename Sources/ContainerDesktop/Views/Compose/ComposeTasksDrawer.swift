@@ -3,6 +3,8 @@ import SwiftUI
 struct ComposeTasksDrawer: View {
     @Environment(\.appLanguage) private var language
     var operationStore: AppOperationStore
+    var statusMessage: String?
+    var statusIsError = false
     var lastOutput: String
     var onClose: () -> Void
 
@@ -14,6 +16,14 @@ struct ComposeTasksDrawer: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if let statusMessage {
+                        StatusBanner(
+                            text: statusMessage,
+                            systemImage: statusIsError ? "exclamationmark.triangle" : "checkmark.circle",
+                            tint: statusIsError ? CDTheme.ember : CDTheme.lime
+                        )
+                    }
+
                     OperationHistoryPanel(
                         store: operationStore,
                         domains: [.compose],
@@ -27,6 +37,7 @@ struct ComposeTasksDrawer: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
         }
         .frame(width: 620)
         .frame(maxHeight: .infinity)
@@ -71,4 +82,3 @@ struct ComposeTasksDrawer: View {
         .padding(16)
     }
 }
-

@@ -10,6 +10,7 @@ struct ComposeView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var composeStore: ComposeProjectStore
+    @Bindable var systemConfigStore: SystemConfigStore
     @Bindable var operationStore: AppOperationStore
     @Bindable var statsHistoryStore: ContainerStatsHistoryStore
 
@@ -98,6 +99,8 @@ struct ComposeView: View {
                     case .tasks:
                         ComposeTasksDrawer(
                             operationStore: operationStore,
+                            statusMessage: composeStore.errorMessage?.nilIfBlank,
+                            statusIsError: composeStore.errorMessage?.nilIfBlank != nil,
                             lastOutput: composeStore.lastOutput,
                             onClose: closeActiveDrawer
                         )
@@ -123,7 +126,7 @@ struct ComposeView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("只会从 ContainerDesktop 列表中移除 \(pendingRemove?.name ?? "该项目")，不会删除文件。")
+            Text("只会从 \(AppBranding.displayName) 列表中移除 \(pendingRemove?.name ?? "该项目")，不会删除文件。")
         }
     }
 
@@ -258,6 +261,14 @@ struct ComposeView: View {
                         .lineLimit(2...4)
                 }
                 .padding(.top, 8)
+            }
+
+            if let errorMessage = composeStore.errorMessage?.nilIfBlank {
+                StatusBanner(text: errorMessage, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
+            }
+
+            if let warning = staleSystemImageConfigurationWarning {
+                StatusBanner(text: warning, systemImage: "hammer.circle", tint: CDTheme.violet)
             }
 
             if !runtimeStore.environment.containerComposeAvailable {
@@ -427,6 +438,19 @@ struct ComposeView: View {
                 }
             }
         }
+    }
+
+    private var staleSystemImageConfigurationWarning: String? {
+        var warnings: [String] = []
+        if composeStore.projects.contains(where: \.hasBuildConfiguredServices),
+           ContainerBuilderImageDefaults.isLegacyLatestImageLoosely(systemConfigStore.config.build.image) {
+            warnings.append(ContainerBuilderImageDefaults.staleConfigurationWarning(language: language))
+        }
+        if !composeStore.projects.isEmpty,
+           ContainerVminitImageDefaults.isLegacyLatestImageLoosely(systemConfigStore.config.vminit.image) {
+            warnings.append(ContainerVminitImageDefaults.staleConfigurationWarning(language: language))
+        }
+        return warnings.joined(separator: "\n").nilIfBlank
     }
 
     private var projectHeader: some View {
@@ -679,6 +703,12 @@ private func composeOperationKey(action: ComposeTaskAction, projectID: String, s
 
 func composeContainerOperationKey(projectID: String, serviceName: String) -> String {
     "\(projectID):containers:\(serviceName)"
+}
+
+private extension ComposeProject {
+    var hasBuildConfiguredServices: Bool {
+        services.contains { $0.buildContext?.nilIfBlank != nil }
+    }
 }
 
 private struct ComposeProjectOverview: View {

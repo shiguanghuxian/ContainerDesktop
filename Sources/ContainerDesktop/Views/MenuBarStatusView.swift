@@ -151,7 +151,7 @@ struct MenuBarStatusView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
-                    Text("ContainerDesktop")
+                    Text(AppBranding.displayName)
                         .font(.headline.weight(.semibold))
                     Text(localized("运行矩阵", "runtime matrix"))
                         .font(.caption2.weight(.bold))
@@ -596,7 +596,7 @@ struct MenuBarStatusView: View {
                 Label(localized("退出", "Quit"), systemImage: "power")
             }
             .buttonStyle(.plain)
-            .help(localized("退出 ContainerDesktop", "Quit ContainerDesktop"))
+            .help(localized("退出 \(AppBranding.displayName)", "Quit \(AppBranding.displayName)"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

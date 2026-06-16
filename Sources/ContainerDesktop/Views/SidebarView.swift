@@ -102,6 +102,7 @@ struct SidebarView: View {
                 }
                 .padding(.vertical, 2)
             }
+            .thinScrollBars()
 
             Spacer(minLength: 0)
 

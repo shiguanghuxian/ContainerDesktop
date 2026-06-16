@@ -8,7 +8,7 @@ struct SystemConfig: Codable, Hashable, Sendable {
         var memory: String
         var image: String
 
-        init(rosetta: Bool = true, cpus: Int = 2, memory: String = "2048mb", image: String = "ghcr.io/apple/container-builder-shim/builder:latest") {
+        init(rosetta: Bool = true, cpus: Int = 2, memory: String = "2048mb", image: String = ContainerBuilderImageDefaults.currentImage) {
             self.rosetta = rosetta
             self.cpus = cpus
             self.memory = memory
@@ -68,7 +68,7 @@ struct SystemConfig: Codable, Hashable, Sendable {
     struct Vminit: Codable, Hashable, Sendable {
         var image: String
 
-        init(image: String = "ghcr.io/apple/containerization/vminit:latest") {
+        init(image: String = ContainerVminitImageDefaults.currentImage) {
             self.image = image
         }
     }
@@ -125,6 +125,7 @@ extension SystemConfig {
     rosetta = true
     cpus = 2
     memory = "2048mb"
+    image = "\(ContainerBuilderImageDefaults.currentImage)"
 
     [container]
     cpus = 4
@@ -132,5 +133,8 @@ extension SystemConfig {
 
     [registry]
     domain = "docker.io"
+
+    [vminit]
+    image = "\(ContainerVminitImageDefaults.currentImage)"
     """
 }

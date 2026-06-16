@@ -8,6 +8,7 @@ struct SystemView: View {
     @State private var showPropertiesDrawer = false
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var isConfirmingCleanup = false
+    private let systemPanelMinimumColumnWidth: CGFloat = 360
 
     var body: some View {
         DrawerPageLayout(isDrawerPresented: showPropertiesDrawer, onDismiss: {
@@ -91,120 +92,203 @@ struct SystemView: View {
                 }
             }
 
+            systemPanels
+        }
+    }
+
+    private var systemPanels: some View {
+        ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 16) {
-                PanelView(title: language.t(.environment), subtitle: runtimeStore.statusTitle(language: language), systemImage: "desktopcomputer") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SystemStatusLine(title: "macOS", value: runtimeStore.environment.macOSVersion)
-                        SystemStatusLine(title: "Architecture", value: runtimeStore.environment.architecture)
-                        SystemStatusLine(
-                            title: "container",
-                            value: environmentComponentValue(
-                                id: ComponentVersionIDs.container,
-                                available: runtimeStore.environment.containerAvailable,
-                                rawVersion: runtimeStore.environment.containerVersion
-                            )
-                        )
-                        SystemStatusLine(
-                            title: "container-compose",
-                            value: environmentComponentValue(
-                                id: ComponentVersionIDs.containerCompose,
-                                available: runtimeStore.environment.containerComposeAvailable,
-                                rawVersion: runtimeStore.environment.containerComposeVersion
-                            )
-                        )
-                        SystemStatusLine(title: "system", value: runtimeStore.environment.systemRunning ? "running" : "stopped")
-                    }
+                VStack(alignment: .leading, spacing: 16) {
+                    environmentPanel
+                    cleanupPanel
+                    configPanel
+                    runtimePropertiesPanel
                 }
-                .frame(maxWidth: .infinity)
+                .frame(minWidth: systemPanelMinimumColumnWidth, maxWidth: .infinity, alignment: .topLeading)
 
-                PanelView(title: localized("组件版本", "Component Versions"), subtitle: componentVersionSubtitle, systemImage: "number") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 10) {
-                            Text(localized("检查 container、container-compose 与运行时组件的最新版本。", "Check the latest versions for container, container-compose, and runtime components."))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                Task { await runtimeStore.checkComponentLatestVersions() }
-                            } label: {
-                                if runtimeStore.isCheckingComponentVersions {
-                                    HStack(spacing: 8) {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                        Text(localized("检查中", "Checking"))
-                                    }
-                                } else {
-                                    Label(localized("检查组件更新", "Check Components"), systemImage: "arrow.clockwise")
-                                }
-                            }
-                            .buttonStyle(CDSecondaryButtonStyle())
-                            .disabled(runtimeStore.isCheckingComponentVersions)
-                            .help(localized("手动检查组件最新版本", "Manually check component latest versions"))
-                        }
-
-                        if let message = runtimeStore.componentVersionErrorMessage?.nilIfBlank {
-                            StatusBanner(text: message, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
-                        }
-
-                        if runtimeStore.componentVersions.isEmpty {
-                            Text(language.t(.noVersionInfo))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(runtimeStore.componentVersions) { component in
-                                ComponentVersionRow(component: component) { command in
-                                    copyToPasteboard(command)
-                                }
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
+                componentVersionsPanel
+                    .frame(minWidth: systemPanelMinimumColumnWidth, maxWidth: .infinity, alignment: .topLeading)
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
 
-            SystemCleanupPanel(
-                diskUsage: runtimeStore.diskUsage,
-                beforeDiskUsage: runtimeStore.cleanupBeforeDiskUsage,
-                afterDiskUsage: runtimeStore.cleanupAfterDiskUsage,
-                statusMessage: runtimeStore.cleanupStatusMessage,
-                isError: runtimeStore.cleanupStatusIsError,
-                isRunning: runtimeStore.isCleanupRunning,
-                onCleanup: { isConfirmingCleanup = true }
-            )
+            VStack(alignment: .leading, spacing: 16) {
+                environmentPanel
+                componentVersionsPanel
+                cleanupPanel
+                configPanel
+                runtimePropertiesPanel
+            }
+        }
+    }
 
-            PanelView(title: "container config.toml", subtitle: systemConfigStore.configPath, systemImage: "doc.badge.gearshape") {
-                HStack(spacing: 12) {
-                    Text(language.resolved == .zhHans ? "配置编辑已移到独立设置窗口，避免主窗口和设置窗口重复。" : "Configuration editing lives in the dedicated Settings window to avoid duplicate settings surfaces.")
+    private var environmentPanel: some View {
+        PanelView(title: language.t(.environment), subtitle: runtimeStore.statusTitle(language: language), systemImage: "desktopcomputer") {
+            VStack(alignment: .leading, spacing: 10) {
+                SystemStatusLine(title: "macOS", value: runtimeStore.environment.macOSVersion)
+                SystemStatusLine(title: "Architecture", value: runtimeStore.environment.architecture)
+                SystemStatusLine(
+                    title: "container",
+                    value: environmentComponentValue(
+                        id: ComponentVersionIDs.container,
+                        available: runtimeStore.environment.containerAvailable,
+                        rawVersion: runtimeStore.environment.containerVersion
+                    )
+                )
+                SystemStatusLine(
+                    title: "container-compose",
+                    value: environmentComponentValue(
+                        id: ComponentVersionIDs.containerCompose,
+                        available: runtimeStore.environment.containerComposeAvailable,
+                        rawVersion: runtimeStore.environment.containerComposeVersion
+                    )
+                )
+                SystemStatusLine(title: "system", value: runtimeStore.environment.systemRunning ? "running" : "stopped")
+            }
+        }
+    }
+
+    private var componentVersionsPanel: some View {
+        PanelView(title: localized("组件版本", "Component Versions"), subtitle: componentVersionSubtitle, systemImage: "number") {
+            VStack(alignment: .leading, spacing: 12) {
+                componentVersionCheckHeader
+
+                if let message = runtimeStore.componentVersionErrorMessage?.nilIfBlank {
+                    StatusBanner(text: message, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
+                }
+
+                if runtimeStore.componentVersions.isEmpty {
+                    Text(language.t(.noVersionInfo))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        ContainerDesktopWindowRouter.openSettings()
-                    } label: {
-                        Label(language.t(.settings), systemImage: "gearshape")
+                } else {
+                    ForEach(runtimeStore.componentVersions) { component in
+                        ComponentVersionRow(component: component) { command in
+                            copyToPasteboard(command)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .help(language.t(.openSettings))
-                }
-            }
-
-            PanelView(title: language.t(.runtimeProperties), subtitle: "container system property list --format json", systemImage: "doc.plaintext") {
-                HStack(spacing: 12) {
-                    Text(language.resolved == .zhHans ? "运行时属性可在右侧抽屉中查看解析概览和原始 JSON。" : "Runtime properties are available in the details drawer as parsed overview and raw JSON.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        showPropertiesDrawer = true
-                        drawerMode = .overview
-                    } label: {
-                        Label(language.t(.details), systemImage: "sidebar.right")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .help(language.resolved == .zhHans ? "打开运行时属性抽屉" : "Open runtime properties drawer")
                 }
             }
         }
+    }
+
+    private var componentVersionCheckHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                componentVersionCheckDescription
+                Spacer()
+                componentVersionCheckButton
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                componentVersionCheckDescription
+                componentVersionCheckButton
+            }
+        }
+    }
+
+    private var componentVersionCheckDescription: some View {
+        Text(localized("检查 container、container-compose 与运行时组件的最新版本。", "Check the latest versions for container, container-compose, and runtime components."))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    private var componentVersionCheckButton: some View {
+        Button {
+            Task { await runtimeStore.checkComponentLatestVersions() }
+        } label: {
+            if runtimeStore.isCheckingComponentVersions {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(localized("检查中", "Checking"))
+                }
+            } else {
+                Label(localized("检查组件更新", "Check Components"), systemImage: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(CDSecondaryButtonStyle())
+        .disabled(runtimeStore.isCheckingComponentVersions)
+        .help(localized("手动检查组件最新版本", "Manually check component latest versions"))
+    }
+
+    private var cleanupPanel: some View {
+        SystemCleanupPanel(
+            diskUsage: runtimeStore.diskUsage,
+            beforeDiskUsage: runtimeStore.cleanupBeforeDiskUsage,
+            afterDiskUsage: runtimeStore.cleanupAfterDiskUsage,
+            statusMessage: runtimeStore.cleanupStatusMessage,
+            isError: runtimeStore.cleanupStatusIsError,
+            isRunning: runtimeStore.isCleanupRunning,
+            onCleanup: { isConfirmingCleanup = true }
+        )
+    }
+
+    private var configPanel: some View {
+        PanelView(title: "container config.toml", subtitle: systemConfigStore.configPath, systemImage: "doc.badge.gearshape") {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    configPanelDescription
+                    Spacer()
+                    settingsButton
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    configPanelDescription
+                    settingsButton
+                }
+            }
+        }
+    }
+
+    private var configPanelDescription: some View {
+        Text(language.resolved == .zhHans ? "配置编辑已移到独立设置窗口，避免主窗口和设置窗口重复。" : "Configuration editing lives in the dedicated Settings window to avoid duplicate settings surfaces.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    private var settingsButton: some View {
+        Button {
+            ContainerDesktopWindowRouter.openSettings()
+        } label: {
+            Label(language.t(.settings), systemImage: "gearshape")
+        }
+        .buttonStyle(.borderedProminent)
+        .help(language.t(.openSettings))
+    }
+
+    private var runtimePropertiesPanel: some View {
+        PanelView(title: language.t(.runtimeProperties), subtitle: "container system property list --format json", systemImage: "doc.plaintext") {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    runtimePropertiesDescription
+                    Spacer()
+                    runtimePropertiesButton
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    runtimePropertiesDescription
+                    runtimePropertiesButton
+                }
+            }
+        }
+    }
+
+    private var runtimePropertiesDescription: some View {
+        Text(language.resolved == .zhHans ? "运行时属性可在右侧抽屉中查看解析概览和原始 JSON。" : "Runtime properties are available in the details drawer as parsed overview and raw JSON.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    private var runtimePropertiesButton: some View {
+        Button {
+            showPropertiesDrawer = true
+            drawerMode = .overview
+        } label: {
+            Label(language.t(.details), systemImage: "sidebar.right")
+        }
+        .buttonStyle(.borderedProminent)
+        .help(language.resolved == .zhHans ? "打开运行时属性抽屉" : "Open runtime properties drawer")
     }
 
     private var componentVersionSubtitle: String {

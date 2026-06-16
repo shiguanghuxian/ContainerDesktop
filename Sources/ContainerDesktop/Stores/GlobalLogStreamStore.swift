@@ -145,7 +145,7 @@ final class GlobalLogStreamStore {
     }
 
     private func appendSystemLine(_ message: String) {
-        logsText.append("[ContainerDesktop] \(message)\n")
+        logsText.append("\(AppBranding.logPrefix) \(message)\n")
         logsText = GlobalLogStreamFormatter.limited(logsText, maxCharacters: maxLogCharacters)
     }
 

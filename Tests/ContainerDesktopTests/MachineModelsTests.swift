@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Machine models")
 struct MachineModelsTests {
+    @Test("machine detail tabs include files")
+    func machineDetailTabsIncludeFiles() {
+        #expect(MachineDetailTab.allCases.contains(.files))
+        #expect(MachineDetailTab.files.title(language: .en) == "Files")
+        #expect(MachineDetailTab.files.systemImage == "folder")
+    }
+
     @Test("generates valid machine names from image references")
     func generatesValidMachineNames() {
         #expect(MachineNameGenerator.automaticName(for: "ubuntu:24.04") == "ubuntu-24-04")

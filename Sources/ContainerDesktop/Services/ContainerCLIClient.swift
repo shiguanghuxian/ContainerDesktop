@@ -287,6 +287,87 @@ struct ContainerCLIClient: Sendable {
         return try await runner.run(executable: "container", arguments: arguments, timeout: 1200).stdout
     }
 
+    func machineFileContent(id: String, path: String, asRoot: Bool = false) async throws -> String {
+        let safePath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !safePath.isEmpty else {
+            throw CommandRunnerError.executableNotFound("empty path")
+        }
+        return try await runMachineShellScript(
+            id: id,
+            script: "cat -- \(ShellEscaper.singleQuoted(safePath))",
+            asRoot: asRoot
+        )
+    }
+
+    func listMachineFiles(id: String, path: String, asRoot: Bool = false) async throws -> [ContainerFileEntry] {
+        let normalizedPath = path.nilIfBlank ?? "/"
+        let script = """
+        dir=\(ShellEscaper.singleQuoted(normalizedPath))
+        if [ ! -d "$dir" ]; then
+          printf 'path is not a directory: %s\\n' "$dir" >&2
+          exit 2
+        fi
+        for p in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+          [ -e "$p" ] || continue
+          name=${p##*/}
+          if [ "$dir" = "/" ]; then
+            entry_path="/$name"
+          else
+            entry_path="$dir/$name"
+          fi
+          kind=$(stat -c '%F' "$p" 2>/dev/null || echo other)
+          mode=$(stat -c '%A' "$p" 2>/dev/null || echo '?')
+          owner=$(stat -c '%U' "$p" 2>/dev/null || echo '?')
+          group=$(stat -c '%G' "$p" 2>/dev/null || echo '?')
+          size=$(stat -c '%s' "$p" 2>/dev/null || echo 0)
+          mtime=$(stat -c '%Y' "$p" 2>/dev/null || echo 0)
+          target=""
+          if [ -L "$p" ]; then target=$(readlink "$p" 2>/dev/null || true); fi
+          printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$name" "$entry_path" "$kind" "$mode" "$owner" "$group" "$size" "$mtime" "$target"
+        done
+        """
+        let output = try await runMachineShellScript(id: id, script: script, asRoot: asRoot)
+        return output
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { ContainerFileEntry.parseListingLine(String($0)) }
+    }
+
+    func writeMachineFile(id: String, path: String, contents: String, asRoot: Bool = false) async throws {
+        let safePath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !safePath.isEmpty else {
+            throw CommandRunnerError.executableNotFound("empty path")
+        }
+        _ = try await runMachineShellScript(
+            id: id,
+            script: "printf '%s' \(ShellEscaper.singleQuoted(contents)) > \(ShellEscaper.singleQuoted(safePath))",
+            asRoot: asRoot
+        )
+    }
+
+    func createMachineDirectory(id: String, path: String, asRoot: Bool = false) async throws {
+        try await runMachineShellScript(
+            id: id,
+            script: "mkdir -p -- \(ShellEscaper.singleQuoted(path))",
+            asRoot: asRoot
+        )
+    }
+
+    func renameMachinePath(id: String, source: String, destination: String, asRoot: Bool = false) async throws {
+        try await runMachineShellScript(
+            id: id,
+            script: "mv -- \(ShellEscaper.singleQuoted(source)) \(ShellEscaper.singleQuoted(destination))",
+            asRoot: asRoot
+        )
+    }
+
+    func deleteMachinePath(id: String, path: String, asRoot: Bool = false) async throws {
+        try await runMachineShellScript(
+            id: id,
+            script: "rm -rf -- \(ShellEscaper.singleQuoted(path))",
+            asRoot: asRoot
+        )
+    }
+
     func startContainer(_ id: String) async throws {
         _ = try await runner.run(executable: "container", arguments: ["start", id], timeout: 60)
     }
@@ -556,6 +637,26 @@ struct ContainerCLIClient: Sendable {
             executable: "container",
             arguments: ["exec", id, "sh", "-lc", script],
             timeout: timeout
+        ).stdout
+    }
+
+    @discardableResult
+    func runMachineShellScript(
+        id: String,
+        script: String,
+        asRoot: Bool = false,
+        timeout: TimeInterval = 600
+    ) async throws -> String {
+        var arguments = ["machine", "run", "-n", id]
+        if asRoot {
+            arguments.append("--root")
+        }
+        arguments.append(contentsOf: ["-i", "--", "sh", "-s"])
+        return try await runner.run(
+            executable: "container",
+            arguments: arguments,
+            timeout: timeout,
+            standardInput: script.hasSuffix("\n") ? script : "\(script)\n"
         ).stdout
     }
 

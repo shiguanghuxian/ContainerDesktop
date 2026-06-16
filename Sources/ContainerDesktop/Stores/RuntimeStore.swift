@@ -12,6 +12,18 @@ private enum RuntimeStoreOperationError: LocalizedError {
     }
 }
 
+struct RuntimeOperationFeedback: Identifiable, Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case running
+        case succeeded
+        case failed
+    }
+
+    var id = UUID()
+    var message: String
+    var phase: Phase
+}
+
 @MainActor
 @Observable
 final class RuntimeStore {
@@ -50,6 +62,7 @@ final class RuntimeStore {
     var selectedFilePath = "/"
     var isRefreshing = false
     var busyMessage: String?
+    var operationFeedback: RuntimeOperationFeedback?
     var errorMessage: String?
     var registryStatusMessage: String?
     var registryStatusIsError = false
@@ -83,6 +96,7 @@ final class RuntimeStore {
     @ObservationIgnored private var latestComponentVersionCheck: ComponentLatestVersionCheck?
     @ObservationIgnored private var resourceMonitorTask: Task<Void, Never>?
     @ObservationIgnored private var isResourceMonitorSampling = false
+    @ObservationIgnored private var operationFeedbackDismissTask: Task<Void, Never>?
 
     init(
         client: ContainerCLIClient = ContainerCLIClient(),
@@ -99,7 +113,7 @@ final class RuntimeStore {
     }
 
     var menuBarTitle: String {
-        isReady ? "ContainerDesktop" : "ContainerDesktop"
+        AppBranding.displayName
     }
 
     var menuBarIcon: String {
@@ -866,6 +880,7 @@ final class RuntimeStore {
             activeOperationKey = operationKey
         }
         busyMessage = message
+        showOperationFeedback(runningOperationMessage(for: message), phase: .running)
         errorMessage = nil
         defer {
             busyMessage = nil
@@ -876,6 +891,7 @@ final class RuntimeStore {
         do {
             try await operation()
             await refreshAll()
+            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3)
             return true
         } catch {
             let resolvedMessage: String
@@ -886,8 +902,70 @@ final class RuntimeStore {
             }
             await refreshAll()
             errorMessage = resolvedMessage
+            showOperationFeedback(failedOperationMessage(for: message), phase: .failed, autoDismissAfter: 6)
             return false
         }
+    }
+
+    func dismissOperationFeedback() {
+        operationFeedbackDismissTask?.cancel()
+        operationFeedbackDismissTask = nil
+        operationFeedback = nil
+    }
+
+    private func showOperationFeedback(
+        _ message: String,
+        phase: RuntimeOperationFeedback.Phase,
+        autoDismissAfter delay: TimeInterval? = nil
+    ) {
+        operationFeedbackDismissTask?.cancel()
+        let feedback = RuntimeOperationFeedback(message: message, phase: phase)
+        operationFeedback = feedback
+
+        guard let delay, delay > 0 else {
+            operationFeedbackDismissTask = nil
+            return
+        }
+
+        let nanoseconds = UInt64(delay * 1_000_000_000)
+        operationFeedbackDismissTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            await MainActor.run {
+                guard let self, self.operationFeedback?.id == feedback.id else { return }
+                self.operationFeedback = nil
+                self.operationFeedbackDismissTask = nil
+            }
+        }
+    }
+
+    private func runningOperationMessage(for message: String) -> String {
+        message.hasPrefix("正在") ? message : "正在\(message)"
+    }
+
+    private func completedOperationMessage(for message: String) -> String {
+        let prefixes = [
+            ("启动", "已启动"),
+            ("停止", "已停止"),
+            ("删除", "已删除"),
+            ("创建", "已创建"),
+            ("运行", "已运行"),
+            ("设置", "已设置"),
+            ("保存", "已保存"),
+            ("拉取", "已拉取"),
+            ("清理", "已清理"),
+        ]
+        for (prefix, replacement) in prefixes where message.hasPrefix(prefix) {
+            return replacement + String(message.dropFirst(prefix.count))
+        }
+        return "\(message)完成"
+    }
+
+    private func failedOperationMessage(for message: String) -> String {
+        message.hasSuffix("失败") ? message : "\(message)失败"
     }
 
     private func machineBootErrorMessage(id: String, error: Error) async -> String {
@@ -1065,10 +1143,13 @@ final class RuntimeStore {
         guard !resolvedIDs.isEmpty else {
             let message = "没有可操作的容器。"
             errorMessage = message
+            showOperationFeedback(message, phase: .failed, autoDismissAfter: 6)
             return (false, message)
         }
 
-        busyMessage = "\(title) \(resolvedIDs.count) 个"
+        let message = "\(title) \(resolvedIDs.count) 个"
+        busyMessage = message
+        showOperationFeedback(runningOperationMessage(for: message), phase: .running)
         errorMessage = nil
         defer { busyMessage = nil }
 
@@ -1077,11 +1158,13 @@ final class RuntimeStore {
                 try await operation(id)
             }
             await refreshAll()
+            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3)
             return (true, "\(title)完成：\(resolvedIDs.joined(separator: ", "))")
         } catch {
             let output = "\(title)失败：\(error.localizedDescription)"
             await refreshAll()
             errorMessage = error.localizedDescription
+            showOperationFeedback(failedOperationMessage(for: title), phase: .failed, autoDismissAfter: 6)
             return (false, output)
         }
     }

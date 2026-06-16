@@ -501,6 +501,7 @@ private struct RegistryBrowserDrawer: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -517,7 +518,7 @@ private struct RegistryBrowserNotice: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(language.t(.loginInstructions))
                     .font(.callout.weight(.semibold))
-                Text(language.resolved == .zhHans ? "登录信息由 container CLI 写入 macOS 钥匙串；私有 Registry 浏览会自动读取该凭据，ContainerDesktop 不保存密码。" : "Credentials are written by the container CLI to macOS Keychain. Private registry browsing reads those credentials and ContainerDesktop does not save passwords.")
+                Text(language.resolved == .zhHans ? "登录信息由 container CLI 写入 macOS 钥匙串；私有 Registry 浏览会自动读取该凭据，\(AppBranding.displayName) 不保存密码。" : "Credentials are written by the container CLI to macOS Keychain. Private registry browsing reads those credentials and \(AppBranding.displayName) does not save passwords.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -947,6 +948,7 @@ private struct RegistryTagListOverlay: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
         }
         .drawerSurface(width: 620)
     }
@@ -1199,6 +1201,7 @@ private struct RegistryTagDetailOverlay: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
         }
         .drawerSurface(width: 620)
     }

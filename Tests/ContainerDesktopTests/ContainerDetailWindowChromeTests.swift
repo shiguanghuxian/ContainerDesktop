@@ -10,6 +10,7 @@ struct ContainerDetailWindowChromeTests {
         )
 
         #expect(appSource.contains("applyMainWindowChrome"))
+        #expect(appSource.contains("private static let mainWindowTitle = AppBranding.displayName"))
         #expect(appSource.contains("hostingController.sizingOptions = []"))
         #expect(appSource.contains("mainHostingController?.sizingOptions = []"))
         #expect(appSource.contains("window.title = \"\""))
@@ -53,11 +54,35 @@ struct ContainerDetailWindowChromeTests {
         )
 
         #expect(chromeSource.contains("ZStack(alignment: .bottomLeading)"))
+        #expect(chromeSource.contains("Text(AppBranding.displayName)"))
         #expect(chromeSource.contains(".frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .center)"))
         #expect(chromeSource.contains(".frame(maxWidth: .infinity, minHeight: 52, idealHeight: 52, maxHeight: 52, alignment: .leading)"))
         #expect(chromeSource.contains("CDTheme.dockerBlue"))
         #expect(!chromeSource.contains(".padding(.top, 8)"))
         #expect(!contentSource.contains("TechBackdrop().ignoresSafeArea()"))
         #expect(contentSource.contains("TechBackdrop()"))
+    }
+
+    @Test("runtime operation feedback uses centered snackbar")
+    func runtimeOperationFeedbackUsesCenteredSnackbar() throws {
+        let contentSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/ContentView.swift",
+            encoding: .utf8
+        )
+        let toastSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Common/OperationToast.swift",
+            encoding: .utf8
+        )
+
+        #expect(contentSource.contains(".overlay(alignment: .bottom)"))
+        #expect(contentSource.contains("OperationToast(feedback: feedback)"))
+        #expect(contentSource.contains("runtimeStore.dismissOperationFeedback()"))
+        #expect(contentSource.contains(".padding(.bottom, 46)"))
+        #expect(!contentSource.contains(".overlay(alignment: .bottomLeading)"))
+        #expect(!contentSource.contains("StatusPill(title: busyMessage"))
+        #expect(toastSource.contains("minWidth: 360"))
+        #expect(toastSource.contains("ProgressView()"))
+        #expect(toastSource.contains("操作完成"))
+        #expect(toastSource.contains("操作失败"))
     }
 }

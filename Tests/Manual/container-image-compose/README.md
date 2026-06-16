@@ -1,6 +1,6 @@
-# Container / Image / Compose Manual Tests
+# Container Desktop Manual Tests
 
-这里放 ContainerDesktop 三个主要功能的手工测试计划和测试资源：
+这里放 Container Desktop 容器、镜像、Compose 三个主要功能的手工测试计划和测试资源：
 
 - `TEST_PLAN.md`：完整测试步骤。
 - `fixtures/container`：容器挂载/文件测试用数据。
@@ -14,4 +14,3 @@
 ```sh
 Tests/Manual/container-image-compose/scripts/cli-smoke.sh
 ```
-

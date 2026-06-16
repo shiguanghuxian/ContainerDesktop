@@ -68,7 +68,7 @@ struct ObservabilityModelsTests {
         #expect(prefixed == "[abcdef1234567890ab] example/api:latest ready\n[abcdef1234567890ab] example/api:latest serving")
         #expect(GlobalLogStreamFormatter.limited("abcdef", maxCharacters: 3) == "def")
         #expect(GlobalLogStreamFormatter.limited("abcdef", maxCharacters: 8) == "abcdef")
-        #expect(GlobalLogStreamFormatter.prefixSystem(chunk: "service ready") == "[ContainerDesktop] service ready")
+        #expect(GlobalLogStreamFormatter.prefixSystem(chunk: "service ready") == "\(AppBranding.logPrefix) service ready")
     }
 
     @Test("normalizes observability input ranges")
@@ -128,11 +128,17 @@ struct ObservabilityModelsTests {
         let liveLogs = """
         [demo-web-1] nginx:latest web ready
         [demo-api-1] example/api:latest api ready
-        [ContainerDesktop] stream notice
+        \(AppBranding.logPrefix) stream notice
+        """
+        let legacyLiveLogs = """
+        [demo-web-1] nginx:latest web ready
+        [demo-api-1] example/api:latest api ready
+        \(AppBranding.legacyLogPrefix) stream notice
         """
 
         #expect(GlobalLogStreamFormatter.filtered(sectionLogs, containerIDs: ["demo-web-1"]) == "[demo-web-1] nginx:latest\nweb ready")
-        #expect(GlobalLogStreamFormatter.filtered(liveLogs, containerIDs: ["demo-web-1"]) == "[demo-web-1] nginx:latest web ready\n[ContainerDesktop] stream notice")
+        #expect(GlobalLogStreamFormatter.filtered(liveLogs, containerIDs: ["demo-web-1"]) == "[demo-web-1] nginx:latest web ready\n\(AppBranding.logPrefix) stream notice")
+        #expect(GlobalLogStreamFormatter.filtered(legacyLiveLogs, containerIDs: ["demo-web-1"]) == "[demo-web-1] nginx:latest web ready\n\(AppBranding.legacyLogPrefix) stream notice")
         #expect(GlobalLogStreamFormatter.filtered(liveLogs, containerIDs: []) == "")
     }
 

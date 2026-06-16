@@ -41,7 +41,7 @@ struct AppTopBar: View {
                 .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("ContainerDesktop")
+                Text(AppBranding.displayName)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
                 Text(language.t(.appSubtitle))

@@ -158,11 +158,11 @@ enum FormPresetOptions {
     }
 
     static let builderImages = [
-        "ghcr.io/apple/container-builder-shim/builder:latest",
+        ContainerBuilderImageDefaults.currentImage,
     ]
 
     static let vminitImages = [
-        "ghcr.io/apple/containerization/vminit:latest",
+        ContainerVminitImageDefaults.currentImage,
     ]
 
     static let registries = [

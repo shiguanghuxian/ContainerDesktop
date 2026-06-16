@@ -177,14 +177,14 @@ struct AboutView: View {
 
     private var heroPanel: some View {
         PanelView(
-            title: "ContainerDesktop",
+            title: AppBranding.displayName,
             subtitle: localized("面向 apple/container 的桌面控制台", "Desktop console for apple/container"),
             systemImage: "shippingbox.fill"
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(localized(
-                    "ContainerDesktop 聚合容器、Machine、镜像、网络、存储卷、Compose、观测和 Registry 登录等常用工作流，让 apple/container 的日常操作更接近桌面软件体验。",
-                    "ContainerDesktop brings containers, machines, images, networks, volumes, Compose, observability, and registry logins into a desktop workflow for apple/container."
+                    "\(AppBranding.displayName) 聚合容器、Machine、镜像、网络、存储卷、Compose、观测和 Registry 登录等常用工作流，让 apple/container 的日常操作更接近桌面软件体验。",
+                    "\(AppBranding.displayName) brings containers, machines, images, networks, volumes, Compose, observability, and registry logins into a desktop workflow for apple/container."
                 ))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -248,7 +248,7 @@ struct AboutView: View {
 
     private var environmentSummary: String {
         """
-        ContainerDesktop: \(appVersion)
+        \(AppBranding.displayName): \(appVersion)
         container CLI: \(runtimeStore.environment.containerAvailable ? "available" : "missing")
         container-compose: \(runtimeStore.environment.containerComposeAvailable ? "available" : "missing")
         system running: \(runtimeStore.environment.systemRunning)
@@ -266,8 +266,8 @@ struct AboutView: View {
         switch appUpdateStore.status {
         case .idle:
             return localized(
-                "从自定义 appcast 检查 ContainerDesktop 新版本。",
-                "Check the custom appcast feed for a newer ContainerDesktop release."
+                "从自定义 appcast 检查 \(AppBranding.displayName) 新版本。",
+                "Check the custom appcast feed for a newer \(AppBranding.displayName) release."
             )
         case .checking:
             return localized("正在检查最新版本…", "Checking for updates...")

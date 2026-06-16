@@ -1,8 +1,8 @@
-# ContainerDesktop
+# Container Desktop
 
 [简体中文](README_zh.md) | English
 
-ContainerDesktop is a macOS desktop console for [apple/container](https://github.com/apple/container). It wraps the local `container` and `container-compose` CLIs with a native SwiftUI interface, so daily container, image, machine, Compose, registry, and observability workflows can be handled from one window without hiding the underlying commands.
+Container Desktop is a macOS desktop console for [apple/container](https://github.com/apple/container). It wraps the local `container` and `container-compose` CLIs with a native SwiftUI interface, so daily container, image, machine, Compose, registry, and observability workflows can be handled from one window without hiding the underlying commands.
 
 ## Highlights
 
@@ -61,7 +61,7 @@ script/build_and_run.sh --telemetry
 
 ## How To Use
 
-1. Open ContainerDesktop and check the environment card in the sidebar or Dashboard.
+1. Open Container Desktop and check the environment card in the sidebar or Dashboard.
 2. If `container` is available but the system is stopped, start it from Dashboard or System.
 3. Pull or build an image from Images, or browse tags from Registries.
 4. Run a container from Containers, then open the detail page for Logs, Inspect, Exec, Files, and Stats.
@@ -96,7 +96,7 @@ Compose projects are persisted by the app and executed with `container-compose`.
 
 ### Registries
 
-Registry login/logout uses the official `container registry` commands. Credentials are handled by the container CLI and macOS Keychain; ContainerDesktop does not persist passwords. The browser can search Docker Hub, query Registry v2 tags for a specific server/repository, inspect tag metadata in a secondary drawer, copy full image references, and pull selected tags.
+Registry login/logout uses the official `container registry` commands. Credentials are handled by the container CLI and macOS Keychain; Container Desktop does not persist passwords. The browser can search Docker Hub, query Registry v2 tags for a specific server/repository, inspect tag metadata in a secondary drawer, copy full image references, and pull selected tags.
 
 ### Volumes And Networks
 
@@ -157,7 +157,7 @@ For notarization, provide a Developer ID signing identity and either `NOTARY_PRO
 
 ## Architecture
 
-ContainerDesktop is intentionally CLI-first:
+Container Desktop is intentionally CLI-first:
 
 1. Views present native macOS workflows using SwiftUI.
 2. Stores such as `RuntimeStore`, `ComposeProjectStore`, `RegistryBrowserStore`, and detail stores own state and async operations.
@@ -170,7 +170,7 @@ This keeps behavior transparent: when something fails, the same underlying comma
 
 ## Safety And Privacy
 
-- Registry passwords are passed to `container registry login --password-stdin` and are not saved by ContainerDesktop.
+- Registry passwords are passed to `container registry login --password-stdin` and are not saved by Container Desktop.
 - Registry browser credentials are only used for the current query and are not persisted by the app.
 - Safe cleanup removes stopped containers and dangling images; it does not delete volumes.
 - Destructive actions use confirmation prompts.

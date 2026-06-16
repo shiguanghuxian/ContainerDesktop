@@ -88,12 +88,22 @@ struct ContentView: View {
         } message: {
             Text(runtimeStore.errorMessage ?? "Unknown error")
         }
-        .overlay(alignment: .bottomLeading) {
-            if let busyMessage = runtimeStore.busyMessage {
-                StatusPill(title: busyMessage, systemImage: "hourglass", tint: .blue)
-                    .padding()
+        .overlay(alignment: .bottom) {
+            if let feedback = runtimeStore.operationFeedback {
+                OperationToast(feedback: feedback) {
+                    runtimeStore.dismissOperationFeedback()
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 46)
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .opacity)
+                        .combined(with: .scale(scale: 0.96, anchor: .bottom))
+                )
+                .zIndex(10)
             }
         }
+        .animation(.snappy(duration: 0.22), value: runtimeStore.operationFeedback?.id)
         .overlay(alignment: .topTrailing) {
             let query = globalSearchText.trimmed
             if !query.isEmpty {
@@ -137,6 +147,7 @@ struct ContentView: View {
                 ComposeView(
                     runtimeStore: runtimeStore,
                     composeStore: composeStore,
+                    systemConfigStore: systemConfigStore,
                     operationStore: operationStore,
                     statsHistoryStore: statsHistoryStore
                 )

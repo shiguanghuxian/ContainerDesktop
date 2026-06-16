@@ -34,9 +34,30 @@ final class SystemConfigStore {
     func reload() async {
         isLoading = true
         errorMessage = nil
+        saveMessage = nil
         defer { isLoading = false }
         do {
-            config = try file.load()
+            var loadedConfig = try file.load()
+            var migrationMessages: [String] = []
+            if ContainerBuilderImageDefaults.isLegacyLatestImage(loadedConfig.build.image) {
+                loadedConfig.build.image = ContainerBuilderImageDefaults.currentImage
+                migrationMessages.append(ContainerBuilderImageDefaults.migrationMessage(configPath: file.url.path))
+            }
+            if ContainerVminitImageDefaults.isLegacyLatestImage(loadedConfig.vminit.image) {
+                loadedConfig.vminit.image = ContainerVminitImageDefaults.currentImage
+                migrationMessages.append(ContainerVminitImageDefaults.migrationMessage(configPath: file.url.path))
+            }
+            if !migrationMessages.isEmpty {
+                config = loadedConfig
+                do {
+                    try file.save(loadedConfig)
+                    saveMessage = migrationMessages.joined(separator: "\n")
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            } else {
+                config = loadedConfig
+            }
         } catch {
             errorMessage = error.localizedDescription
             config = SystemConfig()

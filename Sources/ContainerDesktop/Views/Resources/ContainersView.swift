@@ -459,6 +459,7 @@ struct ContainersView: View {
                 }
                 .padding(16)
             }
+            .thinScrollBars()
             .frame(width: 560, height: 620)
 
             Divider()

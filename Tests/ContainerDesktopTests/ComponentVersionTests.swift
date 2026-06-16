@@ -98,8 +98,8 @@ struct ComponentVersionTests {
                 ComponentVersionIDs.container: ComponentLatestVersion(
                     componentID: ComponentVersionIDs.container,
                     version: "1.1.0",
-                    releaseURL: URL(string: "https://github.com/apple/container/releases/tag/1.1.0"),
-                    sourceName: "GitHub releases"
+                    releaseURL: URL(string: "https://formulae.brew.sh/formula/container"),
+                    sourceName: "Homebrew formula"
                 ),
                 ComponentVersionIDs.containerCompose: ComponentLatestVersion(
                     componentID: ComponentVersionIDs.containerCompose,
@@ -131,7 +131,7 @@ struct ComponentVersionTests {
                     componentID: ComponentVersionIDs.container,
                     version: "1.0.0",
                     releaseURL: nil,
-                    sourceName: "GitHub releases"
+                    sourceName: "Homebrew formula"
                 )
             ],
             errors: []
@@ -146,13 +146,13 @@ struct ComponentVersionTests {
         #expect(items.first { $0.id == ComponentVersionIDs.containerCompose }?.status == .unableToCompare)
     }
 
-    @Test("service decodes GitHub and Homebrew latest versions")
+    @Test("service decodes Homebrew formula latest versions")
     func serviceDecodesLatestVersions() async throws {
         defer { ComponentVersionMockURLProtocol.reset() }
         ComponentVersionMockURLProtocol.setHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            if request.url?.host == "github.test" {
-                return (response, Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/apple/container/releases/tag/v1.2.0"}"#.utf8))
+            if request.url?.lastPathComponent == "container.json" {
+                return (response, Data(#"{"versions":{"stable":"1.2.0"},"homepage":"https://apple.github.io/container/documentation/"}"#.utf8))
             }
             return (response, Data(#"{"versions":{"stable":"1.3.0"},"homepage":"https://github.com/mcrich23/container-compose"}"#.utf8))
         }
@@ -162,15 +162,17 @@ struct ComponentVersionTests {
         #expect(check.errors.isEmpty)
         #expect(check.latestVersion(for: ComponentVersionIDs.container)?.version == "1.2.0")
         #expect(check.latestVersion(for: ComponentVersionIDs.containerCompose)?.version == "1.3.0")
+        #expect(check.latestVersion(for: ComponentVersionIDs.container)?.sourceName == "Homebrew formula")
+        #expect(check.latestVersion(for: ComponentVersionIDs.containerCompose)?.sourceName == "Homebrew formula")
     }
 
     @Test("service preserves partial results when one source fails")
     func servicePreservesPartialResultsWhenOneSourceFails() async throws {
         defer { ComponentVersionMockURLProtocol.reset() }
         ComponentVersionMockURLProtocol.setHandler { request in
-            if request.url?.host == "github.test" {
+            if request.url?.lastPathComponent == "container.json" {
                 let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
-                return (response, Data("failed".utf8))
+                return (response, Data(#"{"message":"API rate limit exceeded for 127.0.0.1. Documentation URL: https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting"}"#.utf8))
             }
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, Data(#"{"versions":{"stable":"1.3.0"},"homepage":"https://github.com/mcrich23/container-compose"}"#.utf8))
@@ -181,13 +183,15 @@ struct ComponentVersionTests {
         #expect(check.latestVersion(for: ComponentVersionIDs.container) == nil)
         #expect(check.latestVersion(for: ComponentVersionIDs.containerCompose)?.version == "1.3.0")
         #expect(check.errorMessage?.contains("container:") == true)
+        #expect(check.errorMessage?.contains("API rate limit exceeded") == false)
+        #expect(check.errorMessage?.contains(#""message""#) == false)
     }
 
     private static func makeService() -> ComponentVersionService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ComponentVersionMockURLProtocol.self]
         return ComponentVersionService(
-            containerReleaseURL: URL(string: "https://github.test/repos/apple/container/releases/latest")!,
+            containerFormulaURL: URL(string: "https://brew.test/api/formula/container.json")!,
             containerComposeFormulaURL: URL(string: "https://brew.test/api/formula/container-compose.json")!,
             session: URLSession(configuration: configuration)
         )

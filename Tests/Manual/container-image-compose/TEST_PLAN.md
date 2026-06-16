@@ -1,6 +1,6 @@
-# ContainerDesktop 容器 / 镜像 / Compose 手工测试计划
+# Container Desktop 容器 / 镜像 / Compose 手工测试计划
 
-本文档用于手工验证 ContainerDesktop 的三个主要功能：容器、镜像、Compose。
+本文档用于手工验证 Container Desktop 的三个主要功能：容器、镜像、Compose。
 
 测试资源都使用 `cd-manual-*` 或 `cdmanualcompose` 前缀。测试结束后运行：
 
@@ -10,7 +10,7 @@ Tests/Manual/container-image-compose/scripts/cleanup.sh
 
 ## 0. 测试前检查
 
-1. 启动 ContainerDesktop。
+1. 启动 Container Desktop。
 2. 确认左下角显示 `Engine running`。
 3. 打开终端确认：
 
@@ -317,4 +317,3 @@ Tests/Manual/container-image-compose/scripts/cleanup.sh
 - 单元测试通过。
 - 应用能重新构建启动。
 - `cd-manual-*` 和 `cdmanualcompose` 资源无残留。
-

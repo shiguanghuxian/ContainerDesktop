@@ -46,6 +46,10 @@ struct MachineDetailPage: View {
                 .task(id: machine.id) {
                     await detailStore.bootstrap()
                 }
+                .onChange(of: detailStore.selectedTab) { _, tab in
+                    guard tab == .files else { return }
+                    Task { await detailStore.loadFilesIfNeeded() }
+                }
                 .onDisappear {
                     detailStore.stopAll()
                 }
@@ -88,6 +92,8 @@ struct MachineDetailPage: View {
             MachineLogsTabView(store: detailStore)
         case .inspect:
             MachineInspectTabView(store: detailStore)
+        case .files:
+            MachineFilesTabView(store: detailStore)
         case .exec:
             MachineExecTabView(store: detailStore, machine: machine) {
                 await runtimeStore.refreshAll()

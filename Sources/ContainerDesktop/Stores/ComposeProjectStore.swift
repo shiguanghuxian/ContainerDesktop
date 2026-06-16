@@ -144,8 +144,11 @@ final class ComposeProjectStore {
                 lastOutput = "\(label) 完成。"
             }
         } catch {
-            errorMessage = error.localizedDescription
-            lastOutput = error.localizedDescription
+            let output = ContainerVminitImageDefaults.appendingLegacyLatestFailureGuidance(
+                to: ContainerBuilderImageDefaults.appendingLegacyLatestFailureGuidance(to: error.localizedDescription)
+            )
+            errorMessage = output
+            lastOutput = output
         }
     }
 
