@@ -11,6 +11,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let originalMainMenu = application.mainMenu
         var openedSections: [AppSection] = []
         var settingsOpenCount = 0
+        var terminalOpenCount = 0
         var updateCheckCount = 0
         var reloadCount = 0
 
@@ -21,6 +22,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let actions = ContainerDesktopMainMenuActions(
             openMain: { section in openedSections.append(section) },
             openSettings: { settingsOpenCount += 1 },
+            openDockerCompatibilityTerminal: { terminalOpenCount += 1 },
             checkForUpdates: { updateCheckCount += 1 },
             reload: { reloadCount += 1 }
         )
@@ -45,6 +47,7 @@ struct ContainerDesktopMainMenuControllerTests {
         #expect(chineseViewTitles == [
             "刷新",
             "Docker 转换",
+            "Docker 兼容终端",
             "Dashboard",
             "Containers",
             "Machines",
@@ -90,6 +93,12 @@ struct ContainerDesktopMainMenuControllerTests {
         #expect(openedSections == [.commandConverter])
         #expect(application.mainMenu?.items[2].submenu?.items.first { $0.representedObject as? String == AppSection.commandConverter.rawValue }?.isEnabled == false)
 
+        if let terminalItem = application.mainMenu?.items[2].submenu?.items.first(where: { $0.title == "Docker 兼容终端" }),
+           let action = terminalItem.action {
+            NSApp.sendAction(action, to: terminalItem.target, from: terminalItem)
+        }
+        #expect(terminalOpenCount == 1)
+
         let englishSnapshot = ContainerDesktopMenuLocalizationSnapshot(
             language: .en,
             selectedSection: .containers
@@ -113,6 +122,7 @@ struct ContainerDesktopMainMenuControllerTests {
         #expect(englishViewTitles == [
             "Refresh",
             "Docker Convert",
+            "Docker Compatibility Terminal",
             "Dashboard",
             "Containers",
             "Machines",
@@ -164,6 +174,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let actions = ContainerDesktopMainMenuActions(
             openMain: { _ in },
             openSettings: {},
+            openDockerCompatibilityTerminal: {},
             checkForUpdates: {},
             reload: {}
         )
@@ -205,6 +216,7 @@ struct ContainerDesktopMainMenuControllerTests {
         let actions = ContainerDesktopMainMenuActions(
             openMain: { _ in },
             openSettings: {},
+            openDockerCompatibilityTerminal: {},
             checkForUpdates: {},
             reload: {}
         )
@@ -224,6 +236,7 @@ struct ContainerDesktopMainMenuControllerTests {
         #expect(application.mainMenu?.items[2].submenu?.items.filter { !$0.isSeparatorItem }.map(\.title) == [
             "Refresh",
             "Docker Convert",
+            "Docker Compatibility Terminal",
             "Dashboard",
             "Containers",
             "Machines",

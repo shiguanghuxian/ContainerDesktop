@@ -8,6 +8,7 @@ struct SystemView: View {
     @State private var showPropertiesDrawer = false
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var isConfirmingCleanup = false
+    @State private var areComponentVersionsExpanded = false
     private let systemPanelMinimumColumnWidth: CGFloat = 360
 
     var body: some View {
@@ -163,7 +164,7 @@ struct SystemView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(runtimeStore.componentVersions) { component in
-                        ComponentVersionRow(component: component) { command in
+                        ComponentVersionRow(component: component, isExpanded: areComponentVersionsExpanded) { command in
                             copyToPasteboard(command)
                         }
                     }
@@ -177,12 +178,12 @@ struct SystemView: View {
             HStack(spacing: 10) {
                 componentVersionCheckDescription
                 Spacer()
-                componentVersionCheckButton
+                componentVersionHeaderControls
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 componentVersionCheckDescription
-                componentVersionCheckButton
+                componentVersionHeaderControls
             }
         }
     }
@@ -191,6 +192,29 @@ struct SystemView: View {
         Text(localized("检查 container、container-compose 与运行时组件的最新版本。", "Check the latest versions for container, container-compose, and runtime components."))
             .font(.callout)
             .foregroundStyle(.secondary)
+    }
+
+    private var componentVersionHeaderControls: some View {
+        HStack(spacing: 8) {
+            componentVersionExpandButton
+            componentVersionCheckButton
+        }
+    }
+
+    private var componentVersionExpandButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.18)) {
+                areComponentVersionsExpanded.toggle()
+            }
+        } label: {
+            Label(
+                areComponentVersionsExpanded ? localized("收起详情", "Collapse Details") : localized("展开详情", "Expand Details"),
+                systemImage: areComponentVersionsExpanded ? "chevron.up" : "chevron.down"
+            )
+        }
+        .buttonStyle(CDSecondaryButtonStyle())
+        .disabled(runtimeStore.componentVersions.isEmpty)
+        .help(areComponentVersionsExpanded ? localized("收起组件版本详情", "Collapse component version details") : localized("展开组件版本详情", "Expand component version details"))
     }
 
     private var componentVersionCheckButton: some View {
@@ -322,9 +346,77 @@ struct SystemView: View {
 private struct ComponentVersionRow: View {
     @Environment(\.appLanguage) private var language
     var component: ComponentVersionItem
+    var isExpanded: Bool
     var onCopyCommand: (String) -> Void
 
     var body: some View {
+        Group {
+            if isExpanded {
+                expandedCard
+            } else {
+                compactRow
+            }
+        }
+    }
+
+    private var compactRow: some View {
+        ViewThatFits(in: .horizontal) {
+            compactSingleLineRow
+            compactWrappedRow
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.hairline)
+        }
+    }
+
+    private var compactSingleLineRow: some View {
+        HStack(spacing: 8) {
+            Text(component.name)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+            ComponentVersionInlineValue(title: localized("当前", "Current"), value: component.currentVersionDisplay)
+            ComponentVersionInlineValue(title: localized("最新", "Latest"), value: component.latestVersionDisplay)
+
+            StatusPill(
+                title: component.status.title(language: language),
+                systemImage: statusIcon,
+                tint: statusTint
+            )
+        }
+    }
+
+    private var compactWrappedRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(component.name)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 8)
+
+                StatusPill(
+                    title: component.status.title(language: language),
+                    systemImage: statusIcon,
+                    tint: statusTint
+                )
+            }
+
+            HStack(spacing: 8) {
+                ComponentVersionInlineValue(title: localized("当前", "Current"), value: component.currentVersionDisplay)
+                ComponentVersionInlineValue(title: localized("最新", "Latest"), value: component.latestVersionDisplay)
+            }
+        }
+    }
+
+    private var expandedCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -422,6 +514,30 @@ private struct ComponentVersionRow: View {
 
     private func localized(_ zh: String, _ en: String) -> String {
         language.resolved == .zhHans ? zh : en
+    }
+}
+
+private struct ComponentVersionInlineValue: View {
+    var title: String
+    var value: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.74)
+        }
+        .padding(.horizontal, 7)
+        .frame(width: 82, height: 26)
+        .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 7))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(CDTheme.hairline)
+        }
     }
 }
 

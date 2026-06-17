@@ -68,7 +68,7 @@ final class AppUpdateStore {
         }
     }
 
-    var releaseNotesPreview: String? {
+    var releaseNotesText: String? {
         let notes: String
         switch status {
         case .upToDate(let release):
@@ -82,10 +82,7 @@ final class AppUpdateStore {
         }
         let normalized = notes.replacingOccurrences(of: "\r\n", with: "\n").trimmed
         guard !normalized.isEmpty else { return nil }
-        if normalized.count <= 420 {
-            return normalized
-        }
-        return String(normalized.prefix(420)) + "..."
+        return normalized
     }
 
     var canRunPrimaryAction: Bool {

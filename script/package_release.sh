@@ -4,10 +4,14 @@ set -euo pipefail
 APP_NAME="ContainerDesktop"
 BUNDLE_ID="com.shiguanghuxian.ContainerDesktop"
 MIN_SYSTEM_VERSION="26.0"
+TERMINAL_APP_NAME="Docker Compatibility Terminal"
+TERMINAL_APP_EXECUTABLE="DockerCompatibilityTerminal"
+TERMINAL_BUNDLE_ID="$BUNDLE_ID.DockerCompatibilityTerminal"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB_DIR="$ROOT_DIR/script/lib"
 ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
+TERMINAL_ICON_SOURCE="$ROOT_DIR/Resources/DockerCompatibilityTerminalIcon.icns"
 DEFAULT_OUTPUT_DIR="$ROOT_DIR/dist/release"
 
 # shellcheck source=script/lib/macos_bundle.sh
@@ -281,6 +285,7 @@ ARCH="$(uname -m)"
 RELEASE_NAME="$APP_NAME-$VERSION-$BUILD_NUMBER-$ARCH"
 WORK_DIR="$OUTPUT_DIR/$RELEASE_NAME"
 APP_BUNDLE="$WORK_DIR/$APP_NAME.app"
+TERMINAL_APP_BUNDLE="$APP_BUNDLE/Contents/Applications/$TERMINAL_APP_NAME.app"
 ZIP_PATH="$OUTPUT_DIR/$RELEASE_NAME.zip"
 DMG_PATH="$OUTPUT_DIR/$RELEASE_NAME.dmg"
 NOTARY_ZIP="$WORK_DIR/$RELEASE_NAME-notary.zip"
@@ -320,6 +325,20 @@ create_macos_app_bundle \
   "$BUILD_BINARY" \
   "$ICON_SOURCE" \
   "$APP_BUNDLE"
+
+create_docker_compatibility_terminal_app_bundle \
+  "$TERMINAL_APP_NAME" \
+  "$TERMINAL_APP_EXECUTABLE" \
+  "$TERMINAL_BUNDLE_ID" \
+  "$VERSION" \
+  "$BUILD_NUMBER" \
+  "$MIN_SYSTEM_VERSION" \
+  "$BUILD_BINARY" \
+  "$TERMINAL_ICON_SOURCE" \
+  "$APP_BUNDLE"
+
+release_log "签名 Docker 兼容终端 app bundle"
+sign_macos_app_bundle "$TERMINAL_APP_BUNDLE" "$CODESIGN_IDENTITY" "$CODESIGN_ENTITLEMENTS"
 
 release_log "签名 app bundle"
 sign_macos_app_bundle "$APP_BUNDLE" "$CODESIGN_IDENTITY" "$CODESIGN_ENTITLEMENTS"

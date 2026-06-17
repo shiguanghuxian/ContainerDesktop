@@ -410,7 +410,20 @@ struct NetworkSummary: Identifiable, Codable, Hashable, Sendable {
     var id: String { configuration.name }
     var name: String { configuration.name }
     var subnetText: String { status.ipv4Subnet }
+    var ipv4ConfigurationText: String { configuration.ipv4Subnet ?? status.ipv4Subnet }
+    var ipv6ConfigurationText: String { configuration.ipv6Subnet ?? "—" }
     var createdText: String { configuration.creationDate.formatted(date: .abbreviated, time: .shortened) }
+    var sortedLabels: [(key: String, value: String)] {
+        configuration.labels.sorted { lhs, rhs in
+            lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+        }
+    }
+    var sortedOptions: [(key: String, value: String)] {
+        configuration.options.sorted { lhs, rhs in
+            lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+        }
+    }
+    var metadataCount: Int { configuration.labels.count + configuration.options.count }
 }
 
 struct RegistrySummary: Identifiable, Codable, Hashable, Sendable {

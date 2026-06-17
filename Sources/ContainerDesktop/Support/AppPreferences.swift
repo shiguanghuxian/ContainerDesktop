@@ -1,5 +1,21 @@
 import SwiftUI
 
+extension UserDefaults {
+    nonisolated(unsafe) static let containerDesktopShared: UserDefaults = {
+        let defaults = UserDefaults(suiteName: AppPaths.bundleIdentifier) ?? .standard
+        for key in [
+            "containerdesktop.appearance",
+            "containerdesktop.language",
+            "containerdesktop.dockerCompatibilityTerminal.style",
+        ] where defaults.object(forKey: key) == nil {
+            if let existingValue = UserDefaults.standard.object(forKey: key) {
+                defaults.set(existingValue, forKey: key)
+            }
+        }
+        return defaults
+    }()
+}
+
 enum AppearancePreference: String, CaseIterable, Identifiable {
     case system
     case light

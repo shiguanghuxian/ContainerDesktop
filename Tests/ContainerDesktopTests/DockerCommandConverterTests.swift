@@ -16,6 +16,29 @@ struct DockerCommandConverterTests {
         #expect(DockerCommandConverter.convert("docker pull nginx:latest").commandText == "container image pull nginx:latest")
         #expect(DockerCommandConverter.convert("docker rmi demo:latest").commandText == "container image delete demo:latest")
         #expect(DockerCommandConverter.convert("docker image rm demo:latest").commandText == "container image delete demo:latest")
+        #expect(DockerCommandConverter.convert("docker save -o image.tar nginx:latest").commandText == "container image save -o image.tar nginx:latest")
+        #expect(DockerCommandConverter.convert("docker load -i image.tar").commandText == "container image load -i image.tar")
+    }
+
+    @Test("converts script argv without reparsing shell quoting")
+    func convertsScriptArguments() {
+        let result = DockerCommandConverter.convertInvocation(
+            executable: "docker",
+            arguments: ["run", "--name", "hello world", "-e", "A=B C", "alpine:latest", "sh", "-lc", "echo ok"]
+        )
+
+        #expect(result.commandText == "container run --name 'hello world' -e 'A=B C' alpine:latest sh -lc 'echo ok'")
+    }
+
+    @Test("converts docker version info and buildx")
+    func convertsVersionInfoAndBuildx() {
+        #expect(DockerCommandConverter.convert("docker --version").commandText == "container --version")
+        #expect(DockerCommandConverter.convert("docker version --format json").commandText == "container system version --format json")
+        #expect(DockerCommandConverter.convert("docker info").commandText == "container system status")
+
+        let buildx = DockerCommandConverter.convert("docker buildx build -t demo:latest .")
+        #expect(buildx.commandText == "container build -t demo:latest .")
+        #expect(buildx.status == .warning)
     }
 
     @Test("converts system prune to safe cleanup")

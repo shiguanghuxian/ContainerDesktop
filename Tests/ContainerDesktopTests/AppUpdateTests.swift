@@ -345,6 +345,29 @@ struct AppUpdateTests {
         #expect(terminated)
     }
 
+    @Test("store exposes full release notes")
+    @MainActor
+    func storeExposesFullReleaseNotes() async throws {
+        let longNotes = (1...90)
+            .map { "release note line \($0)" }
+            .joined(separator: "\n")
+        #expect(longNotes.count > 420)
+        let release = Self.release(version: "1.0.1", releaseNotes: longNotes)
+        let package = AppUpdatePackage(release: release, asset: release.assets[0])
+        let store = AppUpdateStore(
+            service: AppUpdateServiceStub(checkResult: .success(.updateAvailable(package))),
+            installer: AppUpdateInstallerStub(),
+            userDefaults: try Self.makeUserDefaults(),
+            openURL: { _ in },
+            terminateApplication: {}
+        )
+
+        await store.checkForUpdates(isAutomatic: false)
+
+        #expect(store.releaseNotesText == longNotes)
+        #expect(store.releaseNotesText?.hasSuffix("...") == false)
+    }
+
     private static func makeService(
         manifestURL: URL = URL(string: "https://updates.example.test/appcast.json")!,
         statusCode: Int = 200,
@@ -391,14 +414,14 @@ struct AppUpdateTests {
         """
     }
 
-    private static func release(version: String) -> AppUpdateRelease {
+    private static func release(version: String, releaseNotes: String = "Release notes") -> AppUpdateRelease {
         AppUpdateRelease(
             version: SemanticVersion(version)!,
             versionText: version,
             tagName: version,
             title: "ContainerDesktop \(version)",
             publishedAt: nil,
-            releaseNotes: "Release notes",
+            releaseNotes: releaseNotes,
             htmlURL: URL(string: "https://example.test/releases/\(version)")!,
             assets: [
                 AppUpdateAsset(

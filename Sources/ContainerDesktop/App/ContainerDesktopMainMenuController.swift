@@ -28,6 +28,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
     var reload: String
     var help: String
     var commandConverter: String
+    var dockerCompatibilityTerminal: String
     var selectedSectionRaw: String
     var pageItems: [PageItem]
 
@@ -54,6 +55,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
         reload = language.t(.refresh)
         help = language.t(.help)
         commandConverter = language.t(.commandConverter)
+        dockerCompatibilityTerminal = isChinese ? "Docker 兼容终端" : "Docker Compatibility Terminal"
         selectedSectionRaw = selectedSection.rawValue
         pageItems = AppSection.menuPageSections.map { section in
             PageItem(
@@ -85,6 +87,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
             && self.reload == other.reload
             && self.help == other.help
             && self.commandConverter == other.commandConverter
+            && self.dockerCompatibilityTerminal == other.dockerCompatibilityTerminal
             && self.pageItems.map(\.rawValue) == other.pageItems.map(\.rawValue)
             && self.pageItems.map(\.title) == other.pageItems.map(\.title)
     }
@@ -93,6 +96,7 @@ struct ContainerDesktopMenuLocalizationSnapshot: Equatable, Sendable {
 struct ContainerDesktopMainMenuActions {
     var openMain: @MainActor (AppSection) -> Void
     var openSettings: @MainActor () -> Void
+    var openDockerCompatibilityTerminal: @MainActor () -> Void
     var checkForUpdates: @MainActor () -> Void
     var reload: @MainActor () -> Void
 }
@@ -334,6 +338,7 @@ final class ContainerDesktopMainMenuController: NSObject, NSMenuDelegate, NSMenu
         commandConverterItem.representedObject = AppSection.commandConverter.rawValue
         commandConverterItem.isEnabled = snapshot.selectedSectionRaw != AppSection.commandConverter.rawValue
         menu.addItem(commandConverterItem)
+        menu.addItem(item(snapshot.dockerCompatibilityTerminal, action: #selector(openDockerCompatibilityTerminal(_:)), key: "t", modifiers: [.command, .option]))
         menu.addItem(.separator())
 
         for page in snapshot.pageItems {
@@ -420,6 +425,10 @@ final class ContainerDesktopMainMenuController: NSObject, NSMenuDelegate, NSMenu
     @objc private func openCommandConverter(_ sender: NSMenuItem) {
         actions?.openMain(.commandConverter)
         updateSelectedSection(.commandConverter)
+    }
+
+    @objc private func openDockerCompatibilityTerminal(_ sender: NSMenuItem) {
+        actions?.openDockerCompatibilityTerminal()
     }
 
     @objc private func openHelp(_ sender: NSMenuItem) {

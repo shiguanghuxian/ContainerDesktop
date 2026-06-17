@@ -55,14 +55,32 @@ enum ContainerDesktopMainWindow {
 @MainActor
 enum ContainerDesktopWindowRouter {
     private static var openSettingsAction: (() -> Void)?
+    private static var openDockerCompatibilityTerminalAction: (() -> Void)?
+    private static var openDockerCompatibilityTerminalStyleSettingsAction: (() -> Void)?
 
-    static func configure(openSettings: @escaping () -> Void) {
+    static func configure(
+        openSettings: @escaping () -> Void,
+        openDockerCompatibilityTerminal: @escaping () -> Void,
+        openDockerCompatibilityTerminalStyleSettings: @escaping () -> Void
+    ) {
         openSettingsAction = openSettings
+        openDockerCompatibilityTerminalAction = openDockerCompatibilityTerminal
+        openDockerCompatibilityTerminalStyleSettingsAction = openDockerCompatibilityTerminalStyleSettings
     }
 
     static func openSettings() {
         NSApp.activate(ignoringOtherApps: true)
         openSettingsAction?()
+    }
+
+    static func openDockerCompatibilityTerminal() {
+        NSApp.activate(ignoringOtherApps: true)
+        openDockerCompatibilityTerminalAction?()
+    }
+
+    static func openDockerCompatibilityTerminalStyleSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        openDockerCompatibilityTerminalStyleSettingsAction?()
     }
 }
 

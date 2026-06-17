@@ -22,10 +22,14 @@ struct ContainerExecTabView: View {
                 outputEvents: store.terminalOutputEvents,
                 outputSequence: store.terminalOutputSequence,
                 resetSequence: store.terminalResetSequence,
-                isInputEnabled: isTerminalInputEnabled
-            ) { data in
-                store.sendTerminalInputData(data)
-            }
+                isInputEnabled: isTerminalInputEnabled,
+                onSizeChange: { columns, rows in
+                    store.resizeTerminal(columns: columns, rows: rows)
+                },
+                onInput: { data in
+                    store.sendTerminalInputData(data)
+                }
+            )
             .frame(minHeight: 460)
             .overlay(alignment: .bottomLeading) {
                 if isTerminalInputEnabled {

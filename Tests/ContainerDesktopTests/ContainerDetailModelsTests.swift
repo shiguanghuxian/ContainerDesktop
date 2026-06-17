@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import ContainerDesktop
 
-@Suite("Container detail models")
+@Suite("Container detail models", .serialized)
 struct ContainerDetailModelsTests {
     @Test("escapes shell values with single quotes")
     func escapesShellValues() {
@@ -120,6 +120,109 @@ struct ContainerDetailModelsTests {
         #expect(terminated.value != nil)
     }
 
+    @Test("terminal sessions expose configured pseudo-terminal size")
+    func terminalSessionUsesConfiguredPseudoTerminalSize() throws {
+        let output = LockedValue("")
+        let semaphore = DispatchSemaphore(value: 0)
+        let session = ContainerTerminalSession(executable: "/bin/sh", arguments: ["-lc", "stty size"])
+        session.resize(columns: 101, rows: 33)
+
+        try session.start { chunk in
+            output.mutate { $0 += chunk }
+        } onTermination: { _ in
+            semaphore.signal()
+        }
+
+        let result = semaphore.wait(timeout: .now() + 2)
+
+        #expect(result == .success)
+        #expect(output.value.contains("33 101"))
+    }
+
+    @Test("terminal sessions preserve carriage-return progress output")
+    func terminalSessionPreservesProgressCarriageReturns() throws {
+        let output = LockedValue("")
+        let semaphore = DispatchSemaphore(value: 0)
+        let session = ContainerTerminalSession(
+            executable: "/bin/sh",
+            arguments: ["-lc", "test -t 1 && printf 'TTY_OK\\n'; printf '0%%\\r50%%\\r100%%\\n'"]
+        )
+
+        try session.start { chunk in
+            output.mutate { $0 += chunk }
+        } onTermination: { _ in
+            semaphore.signal()
+        }
+
+        let result = semaphore.wait(timeout: .now() + 2)
+
+        #expect(result == .success)
+        #expect(output.value.contains("TTY_OK"))
+        #expect(output.value.contains("\r50%"))
+        #expect(output.value.contains("\r100%"))
+    }
+
+    @Test("terminal sessions deliver Ctrl-C to the foreground process group")
+    func terminalSessionCtrlCInterruptsForegroundCommand() throws {
+        let output = LockedValue("")
+        let semaphore = DispatchSemaphore(value: 0)
+        let session = ContainerTerminalSession(
+            executable: "/bin/sh",
+            arguments: ["-i"]
+        )
+
+        try session.start { chunk in
+            output.mutate { $0 += chunk }
+        } onTermination: { _ in
+            semaphore.signal()
+        }
+
+        Thread.sleep(forTimeInterval: 0.3)
+        session.send("sleep 10\n")
+        Thread.sleep(forTimeInterval: 1.0)
+        session.send(Data([0x03]))
+        Thread.sleep(forTimeInterval: 1.0)
+        session.send("echo AFTER_INT\nexit\n")
+        let result = semaphore.wait(timeout: .now() + 6)
+        session.stop()
+
+        #expect(result == .success)
+        #expect(output.value.contains("AFTER_INT"))
+    }
+
+    @Test("terminal sessions support zsh tab completion")
+    func terminalSessionSupportsZshTabCompletion() throws {
+        let output = LockedValue("")
+        let semaphore = DispatchSemaphore(value: 0)
+        let session = ContainerTerminalSession(
+            executable: "/bin/zsh",
+            arguments: ["-f", "-i"]
+        )
+
+        try session.start { chunk in
+            output.mutate { $0 += chunk }
+        } onTermination: { _ in
+            semaphore.signal()
+        }
+
+        Thread.sleep(forTimeInterval: 0.8)
+        session.send("autoload -Uz compinit; compinit -u -D\n")
+        Thread.sleep(forTimeInterval: 1.0)
+        session.send("cd /Us")
+        session.send(Data([0x09]))
+        Thread.sleep(forTimeInterval: 0.5)
+        session.send("\npwd\nexit\n")
+        let result = semaphore.wait(timeout: .now() + 6)
+        session.stop()
+
+        let lines = output.value
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        #expect(result == .success)
+        #expect(lines.contains("/Users"))
+    }
+
     private static func makeStatsSnapshot(
         id: String,
         blockReadBytes: Int64 = 0,
@@ -162,6 +265,12 @@ private final class LockedValue<Value>: @unchecked Sendable {
     func set(_ value: Value) {
         lock.lock()
         storedValue = value
+        lock.unlock()
+    }
+
+    func mutate(_ body: (inout Value) -> Void) {
+        lock.lock()
+        body(&storedValue)
         lock.unlock()
     }
 }

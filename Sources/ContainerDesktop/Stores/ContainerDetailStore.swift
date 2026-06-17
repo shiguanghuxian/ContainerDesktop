@@ -45,6 +45,8 @@ final class ContainerDetailStore {
 
     @ObservationIgnored private var logStream: ContainerProcessStream?
     @ObservationIgnored private var terminalSession: ContainerTerminalSession?
+    @ObservationIgnored private var terminalColumns = 80
+    @ObservationIgnored private var terminalRows = 24
 
     init(containerID: String, client: ContainerCLIClient = ContainerCLIClient()) {
         self.containerID = containerID
@@ -185,6 +187,7 @@ final class ContainerDetailStore {
         do {
             let session = try await client.makeContainerShellSession(id: containerID, shell: "sh")
             terminalSession = session
+            session.resize(columns: terminalColumns, rows: terminalRows)
             try session.start { [weak self] chunk in
                 Task { @MainActor in
                     self?.appendTerminalChunk(chunk)
@@ -212,6 +215,12 @@ final class ContainerDetailStore {
     func sendTerminalInputData(_ data: Data) {
         guard terminalState.isConnected else { return }
         terminalSession?.send(data)
+    }
+
+    func resizeTerminal(columns: Int, rows: Int) {
+        terminalColumns = columns
+        terminalRows = rows
+        terminalSession?.resize(columns: columns, rows: rows)
     }
 
     func clearTerminal() {

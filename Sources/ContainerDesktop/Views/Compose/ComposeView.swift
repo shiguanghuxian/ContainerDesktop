@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -33,6 +34,8 @@ struct ComposeView: View {
     @State private var composeUlimitsText = ""
     @State private var activeComposeOperationKey: String?
     @State private var activeComposeContainerActionKey: String?
+
+    private let projectActionColumnWidth: CGFloat = 244
 
     private var composeTypes: [UTType] {
         [
@@ -357,6 +360,13 @@ struct ComposeView: View {
                                         selectProject(project)
                                     }
                                     RowActionButton(
+                                        systemImage: "folder",
+                                        tint: CDTheme.cyan,
+                                        help: language.resolved == .zhHans ? "打开 Compose 文件所在文件夹" : "Open Compose file folder"
+                                    ) {
+                                        openProjectFolder(project)
+                                    }
+                                    RowActionButton(
                                         systemImage: "hammer",
                                         isLoading: activeComposeOperationKey == buildKey,
                                         isDisabled: isComposeOperationBlocked(except: buildKey),
@@ -397,7 +407,7 @@ struct ComposeView: View {
                                         pendingRemove = project
                                     }
                                 }
-                                .frame(width: 208, alignment: .trailing)
+                                .frame(width: projectActionColumnWidth, alignment: .trailing)
                             }
 
                             if expandedProjectIDs.contains(project.id) {
@@ -462,7 +472,7 @@ struct ComposeView: View {
             ResourceTableHeaderLabel(title: language.t(.status), width: 112)
             ResourceTableHeaderLabel(title: "Vol / Net", width: 96, alignment: .trailing)
             ResourceTableHeaderLabel(title: language.t(.modified), width: 140)
-            ResourceTableHeaderLabel(title: language.t(.actions), width: 208, alignment: .trailing)
+            ResourceTableHeaderLabel(title: language.t(.actions), width: projectActionColumnWidth, alignment: .trailing)
         }
     }
 
@@ -493,6 +503,29 @@ struct ComposeView: View {
             } else {
                 expandedProjectIDs.insert(project.id)
             }
+        }
+    }
+
+    private func openProjectFolder(_ project: ComposeProject) {
+        let fileManager = FileManager.default
+        var isDirectory = ObjCBool(false)
+        if fileManager.fileExists(atPath: project.path.path, isDirectory: &isDirectory) {
+            if isDirectory.boolValue {
+                _ = NSWorkspace.shared.open(project.path)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([project.path])
+            }
+            return
+        }
+
+        let folderURL = project.path.deletingLastPathComponent()
+        if fileManager.fileExists(atPath: folderURL.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            _ = NSWorkspace.shared.open(folderURL)
+        } else {
+            composeStore.errorMessage = language.resolved == .zhHans
+                ? "找不到 Compose 文件所在文件夹：\(folderURL.path)"
+                : "Unable to find the Compose file folder: \(folderURL.path)"
         }
     }
 

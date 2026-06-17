@@ -2,8 +2,8 @@ import SwiftUI
 
 struct SystemConfigEditorView: View {
     @Environment(\.appLanguage) private var language
-    @AppStorage("containerdesktop.appearance") private var appearanceRaw = AppearancePreference.system.rawValue
-    @AppStorage("containerdesktop.language") private var languageRaw = AppLanguage.system.rawValue
+    @AppStorage("containerdesktop.appearance", store: .containerDesktopShared) private var appearanceRaw = AppearancePreference.system.rawValue
+    @AppStorage("containerdesktop.language", store: .containerDesktopShared) private var languageRaw = AppLanguage.system.rawValue
     @Bindable var systemConfigStore: SystemConfigStore
 
     @State private var selectedCategory: ConfigCategory = .general

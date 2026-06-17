@@ -5,18 +5,46 @@ import UniformTypeIdentifiers
 private enum ImageDrawerSelection: Equatable {
     case tasks
     case image(String)
+    case repositoryGroup(String)
+}
+
+private struct ImageDeleteRequest: Identifiable {
+    var references: [String]
+    var isBatch: Bool
+
+    var id: String {
+        "\(isBatch)-\(references.joined(separator: "\u{1F}"))"
+    }
+}
+
+private enum ImageReferenceSelectionAction: Hashable {
+    case openDetail
+    case tag
+    case push
+    case export
+    case delete
+}
+
+private struct ImageReferenceSelectionRequest: Identifiable {
+    var id = UUID()
+    var title: String
+    var images: [ImageSummary]
+    var action: ImageReferenceSelectionAction
 }
 
 struct ImagesView: View {
     @Environment(\.appLanguage) private var language
+    @AppStorage(ImageListDisplayMode.defaultsKey, store: .containerDesktopShared) private var imageListDisplayModeRaw = ImageListDisplayMode.tags.rawValue
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var operationStore: AppOperationStore
     @State private var searchText = ""
+    @State private var selectedRegistryFilter = ImageRegistryFilterOption.allID
     @State private var pullReference = "alpine:latest"
     @State private var useCustomPullReference = false
     @State private var customPullReference = ""
     @State private var detailReference: String?
-    @State private var pendingDelete: ImageSummary?
+    @State private var selectedImageReferences = Set<String>()
+    @State private var pendingDeleteRequest: ImageDeleteRequest?
     @State private var showPullPopover = false
     @State private var showBuildPopover = false
     @State private var showTagPopover = false
@@ -58,13 +86,55 @@ struct ImagesView: View {
     @State private var loadForce = false
     @State private var drawerSelection: ImageDrawerSelection?
     @State private var drawerMode: DetailDrawerMode = .overview
+    @State private var referenceSelectionRequest: ImageReferenceSelectionRequest?
 
-    private var filteredImages: [ImageSummary] {
+    private var imageListDisplayMode: ImageListDisplayMode {
+        ImageListDisplayMode(rawValue: imageListDisplayModeRaw) ?? .tags
+    }
+
+    private var registryFilteredImages: [ImageSummary] {
+        selectedRegistryFilter == ImageRegistryFilterOption.allID
+            ? runtimeStore.images
+            : runtimeStore.images.filter { $0.registryIdentity.id == selectedRegistryFilter }
+    }
+
+    private var imageListEntries: [ImageListEntry] {
+        let entries = ImageListEntry.make(
+            images: registryFilteredImages,
+            displayMode: imageListDisplayMode
+        )
         let query = searchText.trimmed.lowercased()
-        guard !query.isEmpty else { return runtimeStore.images }
-        return runtimeStore.images.filter {
-            $0.reference.lowercased().contains(query) || $0.digest.lowercased().contains(query)
+        guard !query.isEmpty else { return entries }
+        return entries.filter {
+            $0.searchText.contains(query)
         }
+    }
+
+    private var registryFilterOptions: [ImageRegistryFilterOption] {
+        ImageRegistryFilterOptions.make(
+            images: runtimeStore.images,
+            registries: runtimeStore.registries
+        )
+    }
+
+    private var filteredImageReferences: [String] {
+        imageListEntries.flatMap(\.references)
+    }
+
+    private var filteredImageReferenceSet: Set<String> {
+        Set(filteredImageReferences)
+    }
+
+    private var selectedExistingImageReferences: [String] {
+        filteredImageReferences.filter { selectedImageReferences.contains($0) }
+    }
+
+    private var areAllFilteredImagesSelected: Bool {
+        !filteredImageReferences.isEmpty && filteredImageReferenceSet.isSubset(of: selectedImageReferences)
+    }
+
+    private var hasFilteredImageSelection: Bool {
+        !selectedImageReferences.isDisjoint(with: filteredImageReferenceSet)
     }
 
     private var detailImage: ImageSummary? {
@@ -77,19 +147,33 @@ struct ImagesView: View {
         return runtimeStore.images.first { $0.reference == reference }
     }
 
+    private var drawerRepositoryGroup: ImageRepositoryGroup? {
+        guard case let .repositoryGroup(id) = drawerSelection else { return nil }
+        return ImageRepositoryGroup.make(images: registryFilteredImages).first { $0.id == id }
+    }
+
     private var isDrawerPresented: Bool {
         switch drawerSelection {
         case .tasks:
             true
         case .image:
             drawerImage != nil
+        case .repositoryGroup:
+            drawerRepositoryGroup != nil
         case nil:
             false
         }
     }
 
     private var drawerWidth: CGFloat {
-        drawerSelection == .tasks ? 620 : 430
+        switch drawerSelection {
+        case .tasks:
+            return 620
+        case .repositoryGroup:
+            return 520
+        case .image, nil:
+            return 430
+        }
     }
 
     private var pullChoices: [String] {
@@ -134,83 +218,58 @@ struct ImagesView: View {
                 }
             }
         }
-        .alert("删除镜像？", isPresented: Binding(
-            get: { pendingDelete != nil },
-            set: { if !$0 { pendingDelete = nil } }
+        .alert(deleteAlertTitle, isPresented: Binding(
+            get: { pendingDeleteRequest != nil },
+            set: { if !$0 { pendingDeleteRequest = nil } }
         )) {
-            if let image = pendingDelete {
-                Button("删除", role: .destructive) {
-                    pendingDelete = nil
-                    deleteImage(image)
+            if let request = pendingDeleteRequest {
+                Button(deleteAlertButtonTitle(for: request), role: .destructive) {
+                    pendingDeleteRequest = nil
+                    if request.isBatch {
+                        deleteImages(request.references)
+                    } else if let reference = request.references.first {
+                        deleteImage(reference)
+                    }
                 }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将删除镜像 \(pendingDelete?.reference ?? "所选镜像")。被容器引用的镜像可能无法删除。")
+            Text(deleteAlertMessage)
+        }
+        .onChange(of: runtimeStore.images.map(\.reference)) { _, _ in
+            pruneSelectedImages()
+            pruneSelectedRegistryFilter()
+        }
+        .onChange(of: runtimeStore.registries.map(\.server)) { _, _ in
+            pruneSelectedRegistryFilter()
+        }
+        .confirmationDialog(
+            referenceSelectionRequest?.title ?? "",
+            isPresented: Binding(
+                get: { referenceSelectionRequest != nil },
+                set: { if !$0 { referenceSelectionRequest = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let request = referenceSelectionRequest {
+                ForEach(request.images, id: \.reference) { image in
+                    Button(image.reference) {
+                        performReferenceSelection(image, action: request.action)
+                        referenceSelectionRequest = nil
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {
+                referenceSelectionRequest = nil
+            }
+        } message: {
+            Text(language.resolved == .zhHans ? "选择要操作的镜像 tag。" : "Choose the image tag to use.")
         }
     }
 
     private var pageContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            PageHeader(
-                title: language.t(.images),
-                subtitle: language.t(.imagesSubtitle),
-                systemImage: "photo.stack"
-            ) {
-                HStack(spacing: 8) {
-                    Button {
-                        showPullPopover = true
-                    } label: {
-                        if runtimeStore.isOperationActive(RuntimeOperationKey.imagePull) {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text(language.resolved == .zhHans ? "拉取中" : "Pulling")
-                            }
-                        } else {
-                            Label(language.t(.pull), systemImage: "arrow.down.circle")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
-                    .help(language.resolved == .zhHans ? "拉取镜像" : "Pull image")
-
-                    Menu {
-                        Button {
-                            showBuildPopover = true
-                        } label: {
-                            Label(language.t(.build), systemImage: "hammer")
-                        }
-                        Button {
-                            showLoadPopover = true
-                        } label: {
-                            Label(language.resolved == .zhHans ? "导入" : "Import", systemImage: "square.and.arrow.down")
-                        }
-                        Button {
-                            prepareSaveAllImages()
-                        } label: {
-                            Label(language.resolved == .zhHans ? "批量导出" : "Export", systemImage: "square.and.arrow.up")
-                        }
-                        Divider()
-                        Button {
-                            pruneDanglingImages()
-                        } label: {
-                            Label(language.resolved == .zhHans ? "清理无标签镜像" : "Prune dangling images", systemImage: "sparkles")
-                        }
-                    } label: {
-                        Label(language.resolved == .zhHans ? "更多" : "More", systemImage: "ellipsis.circle")
-                    }
-                    .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
-                    .help(language.resolved == .zhHans ? "更多镜像操作" : "More image actions")
-
-                    Button {
-                        openTasksDrawer()
-                    } label: {
-                        Label(language.resolved == .zhHans ? "镜像任务" : "Image Tasks", systemImage: "clock.arrow.circlepath")
-                    }
-                    .help(language.resolved == .zhHans ? "打开镜像任务列表" : "Open image tasks")
-                }
-            }
+            pageHeader
 
             if let message = runtimeStore.imageOperationStatusMessage {
                 StatusBanner(
@@ -220,13 +279,9 @@ struct ImagesView: View {
                 )
             }
 
-            ResourceToolbar(searchText: $searchText, placeholder: language.t(.search)) {
-                Text(language.itemCount(filteredImages.count))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            imageToolbar
 
-            if filteredImages.isEmpty {
+            if imageListEntries.isEmpty {
                 ResourceTable {
                     imageHeader
                 } rows: {
@@ -237,70 +292,8 @@ struct ImagesView: View {
                 ResourceTable {
                     imageHeader
                 } rows: {
-                    ForEach(filteredImages) { image in
-                        ResourceTableRow(isSelected: detailReference == image.reference || drawerImage?.reference == image.reference) {
-                            let deleteKey = RuntimeOperationKey.imageDelete(image.reference)
-                            let isOperationBlocked = runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning
-                            ResourceStatusDot(tint: image.variants.isEmpty ? .secondary : CDTheme.lime, isHollow: image.variants.isEmpty)
-
-                            Button {
-                                selectImage(image)
-                            } label: {
-                                HStack(spacing: 0) {
-                                    Text(image.reference)
-                                        .font(.callout.weight(.medium))
-                                        .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    Text(image.tag)
-                                        .font(.callout)
-                                        .lineLimit(1)
-                                        .frame(width: 120, alignment: .leading)
-
-                                    Text(String(image.id.prefix(12)))
-                                        .font(.callout.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 130, alignment: .leading)
-
-                                    Text(image.createdText)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 130, alignment: .leading)
-
-                                    Text(image.sizeDisplay)
-                                        .frame(width: 86, alignment: .trailing)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help(language.resolved == .zhHans ? "打开镜像详情" : "Open image details")
-
-                            HStack(spacing: 8) {
-                                RowActionButton(
-                                    systemImage: "sidebar.right",
-                                    help: language.resolved == .zhHans ? "打开镜像概览抽屉" : "Open image overview drawer"
-                                ) {
-                                    openImageDrawer(image)
-                                }
-                                ImageRowMoreMenu(isDisabled: isOperationBlocked) {
-                                    tagSource = image.reference
-                                    tagTarget = suggestedTagTarget(for: image.reference)
-                                    showTagPopover = true
-                                } onPush: {
-                                    pushReference = image.reference
-                                    showPushPopover = true
-                                } onExport: {
-                                    prepareSaveImage(image)
-                                }
-                                DestructiveRowActionButton(
-                                    isLoading: runtimeStore.isOperationActive(deleteKey),
-                                    isDisabled: isOperationBlocked && !runtimeStore.isOperationActive(deleteKey),
-                                    help: language.resolved == .zhHans ? "删除镜像" : "Delete image"
-                                ) {
-                                    pendingDelete = image
-                                }
-                            }
-                            .frame(width: 118, alignment: .trailing)
-                        }
+                    ForEach(imageListEntries) { entry in
+                        imageRow(entry)
                     }
                 }
             }
@@ -325,14 +318,229 @@ struct ImagesView: View {
         }
     }
 
+    private var pageHeader: some View {
+        PageHeader(
+            title: language.t(.images),
+            subtitle: language.t(.imagesSubtitle),
+            systemImage: "photo.stack"
+        ) {
+            HStack(spacing: 8) {
+                pullButton
+                refreshButton
+                imageMoreMenu
+                Button {
+                    openTasksDrawer()
+                } label: {
+                    Label(language.resolved == .zhHans ? "镜像任务" : "Image Tasks", systemImage: "clock.arrow.circlepath")
+                }
+                .help(language.resolved == .zhHans ? "打开镜像任务列表" : "Open image tasks")
+            }
+        }
+    }
+
+    private var pullButton: some View {
+        Button {
+            showPullPopover = true
+        } label: {
+            if runtimeStore.isOperationActive(RuntimeOperationKey.imagePull) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(language.resolved == .zhHans ? "拉取中" : "Pulling")
+                }
+            } else {
+                Label(language.t(.pull), systemImage: "arrow.down.circle")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
+        .help(language.resolved == .zhHans ? "拉取镜像" : "Pull image")
+    }
+
+    private var refreshButton: some View {
+        Button {
+            refreshImages()
+        } label: {
+            if runtimeStore.isRefreshing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(language.resolved == .zhHans ? "刷新中" : "Refreshing")
+                }
+            } else {
+                Label(language.t(.refresh), systemImage: "arrow.clockwise")
+            }
+        }
+        .disabled(runtimeStore.isRefreshing)
+        .help(language.resolved == .zhHans ? "刷新镜像列表" : "Refresh image list")
+    }
+
+    private var imageMoreMenu: some View {
+        Menu {
+            Button {
+                showBuildPopover = true
+            } label: {
+                Label(language.t(.build), systemImage: "hammer")
+            }
+            Button {
+                showLoadPopover = true
+            } label: {
+                Label(language.resolved == .zhHans ? "导入" : "Import", systemImage: "square.and.arrow.down")
+            }
+            Button {
+                prepareSaveAllImages()
+            } label: {
+                Label(language.resolved == .zhHans ? "批量导出" : "Export", systemImage: "square.and.arrow.up")
+            }
+            Divider()
+            Button {
+                pruneDanglingImages()
+            } label: {
+                Label(language.resolved == .zhHans ? "清理无标签镜像" : "Prune dangling images", systemImage: "sparkles")
+            }
+        } label: {
+            Label(language.resolved == .zhHans ? "更多" : "More", systemImage: "ellipsis.circle")
+        }
+        .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
+        .help(language.resolved == .zhHans ? "更多镜像操作" : "More image actions")
+    }
+
+    private var imageToolbar: some View {
+        ResourceToolbar(searchText: $searchText, placeholder: language.t(.search)) {
+            toolbarFilterControls
+            if !selectedExistingImageReferences.isEmpty {
+                Text(language.resolved == .zhHans ? "已选 \(selectedExistingImageReferences.count) 个" : "\(selectedExistingImageReferences.count) selected")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button(role: .destructive) {
+                    confirmDeleteSelectedImages()
+                } label: {
+                    Label(language.resolved == .zhHans ? "删除所选" : "Delete Selected", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning)
+                .help(language.resolved == .zhHans ? "删除已勾选的镜像" : "Delete selected images")
+            }
+            Text(language.itemCount(imageListEntries.count))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var toolbarFilterControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                displayModeMenuButton
+                registryFilterMenuButton
+            }
+            compactFilterMenuButton
+        }
+    }
+
+    private func imageRow(_ entry: ImageListEntry) -> some View {
+        ResourceTableRow(isSelected: isEntrySelected(entry)) {
+            let primaryImage = entry.primaryImage
+            imageSelectionButton(for: entry)
+            ResourceStatusDot(tint: primaryImage.variants.isEmpty ? .secondary : CDTheme.lime, isHollow: primaryImage.variants.isEmpty)
+            imageRowMainButton(entry)
+            imageRowActions(entry)
+        }
+    }
+
+    private func imageRowMainButton(_ entry: ImageListEntry) -> some View {
+        Button {
+            selectEntry(entry)
+        } label: {
+            HStack(spacing: 0) {
+                Text(entry.title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(entry.tagText)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .frame(width: 120, alignment: .leading)
+
+                Text(entry.imageIDText)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 130, alignment: .leading)
+
+                Text(entry.createdText)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 130, alignment: .leading)
+
+                Text(entry.sizeDisplay)
+                    .frame(width: 86, alignment: .trailing)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(entry.references.count > 1
+            ? (language.resolved == .zhHans ? "选择 tag 后打开镜像详情" : "Choose a tag to open image details")
+            : (language.resolved == .zhHans ? "打开镜像详情" : "Open image details"))
+    }
+
+    private func imageRowActions(_ entry: ImageListEntry) -> some View {
+        let primaryImage = entry.primaryImage
+        let deleteKey = RuntimeOperationKey.imageDelete(primaryImage.reference)
+        let isOperationBlocked = runtimeStore.activeOperationKey != nil || runtimeStore.isImageOperationRunning
+        return HStack(spacing: 8) {
+            RowActionButton(
+                systemImage: "sidebar.right",
+                help: imageListDisplayMode == .repositories
+                    ? (language.resolved == .zhHans ? "打开仓库 tag 概览抽屉" : "Open repository tag overview drawer")
+                    : (language.resolved == .zhHans ? "打开镜像概览抽屉" : "Open image overview drawer")
+            ) {
+                openEntryDrawer(entry)
+            }
+            ImageRowMoreMenu(isDisabled: isOperationBlocked) {
+                requestImageAction(.tag, for: entry)
+            } onPush: {
+                requestImageAction(.push, for: entry)
+            } onExport: {
+                requestImageAction(.export, for: entry)
+            }
+            DestructiveRowActionButton(
+                isLoading: runtimeStore.isOperationActive(deleteKey),
+                isDisabled: isOperationBlocked && !runtimeStore.isOperationActive(deleteKey),
+                help: language.resolved == .zhHans ? "删除镜像" : "Delete image"
+            ) {
+                requestImageAction(.delete, for: entry)
+            }
+        }
+        .frame(width: 118, alignment: .trailing)
+    }
+
     private func selectImage(_ image: ImageSummary) {
         drawerSelection = nil
         detailReference = image.reference
     }
 
+    private func selectEntry(_ entry: ImageListEntry) {
+        switch entry {
+        case .image(let image):
+            selectImage(image)
+        case .repository(let group):
+            requestImageAction(.openDetail, for: group)
+        }
+    }
+
     private func openImageDrawer(_ image: ImageSummary) {
         drawerSelection = .image(image.reference)
         drawerMode = .overview
+    }
+
+    private func openEntryDrawer(_ entry: ImageListEntry) {
+        switch entry {
+        case .image(let image):
+            openImageDrawer(image)
+        case .repository(let group):
+            drawerSelection = .repositoryGroup(group.id)
+            drawerMode = .overview
+        }
     }
 
     private func openTasksDrawer() {
@@ -346,6 +554,72 @@ struct ImagesView: View {
 
     private func closeDrawer() {
         drawerSelection = nil
+    }
+
+    private func isEntrySelected(_ entry: ImageListEntry) -> Bool {
+        if detailReference == entry.primaryImage.reference || drawerImage?.reference == entry.primaryImage.reference {
+            return true
+        }
+        if case .repository(let group) = entry,
+           drawerRepositoryGroup?.id == group.id {
+            return true
+        }
+        return entry.references.contains { selectedImageReferences.contains($0) }
+    }
+
+    private func requestImageAction(_ action: ImageReferenceSelectionAction, for entry: ImageListEntry) {
+        switch entry {
+        case .image(let image):
+            performReferenceSelection(image, action: action)
+        case .repository(let group):
+            requestImageAction(action, for: group)
+        }
+    }
+
+    private func requestImageAction(_ action: ImageReferenceSelectionAction, for group: ImageRepositoryGroup) {
+        guard group.images.count > 1 else {
+            if let image = group.images.first {
+                performReferenceSelection(image, action: action)
+            }
+            return
+        }
+        referenceSelectionRequest = ImageReferenceSelectionRequest(
+            title: referenceSelectionTitle(action: action, group: group),
+            images: group.images,
+            action: action
+        )
+    }
+
+    private func performReferenceSelection(_ image: ImageSummary, action: ImageReferenceSelectionAction) {
+        switch action {
+        case .openDetail:
+            selectImage(image)
+        case .tag:
+            prepareTagImage(image)
+        case .push:
+            preparePushImage(image)
+        case .export:
+            prepareSaveImage(image)
+        case .delete:
+            pendingDeleteRequest = ImageDeleteRequest(references: [image.reference], isBatch: false)
+        }
+    }
+
+    private func referenceSelectionTitle(action: ImageReferenceSelectionAction, group: ImageRepositoryGroup) -> String {
+        let actionTitle: String
+        switch action {
+        case .openDetail:
+            actionTitle = language.resolved == .zhHans ? "打开镜像详情" : "Open image details"
+        case .tag:
+            actionTitle = language.resolved == .zhHans ? "标记镜像" : "Tag image"
+        case .push:
+            actionTitle = language.resolved == .zhHans ? "推送镜像" : "Push image"
+        case .export:
+            actionTitle = language.resolved == .zhHans ? "导出镜像" : "Export image"
+        case .delete:
+            actionTitle = language.resolved == .zhHans ? "删除镜像" : "Delete image"
+        }
+        return "\(actionTitle) · \(group.displayName)"
     }
 
     @ViewBuilder
@@ -371,6 +645,21 @@ struct ImagesView: View {
                     ImageDrawerOverview(image: drawerImage)
                 }
             }
+        case .repositoryGroup:
+            if let drawerRepositoryGroup {
+                DetailDrawer(
+                    mode: $drawerMode,
+                    title: drawerRepositoryGroup.displayName,
+                    subtitle: drawerRepositoryGroup.tagSummary,
+                    systemImage: "photo.stack",
+                    rawText: repositoryGroupRawSummary(drawerRepositoryGroup),
+                    onClose: closeDrawer
+                ) {
+                    ImageRepositoryGroupDrawerOverview(group: drawerRepositoryGroup) { image in
+                        selectImage(image)
+                    }
+                }
+            }
         case nil:
             EmptyView()
         }
@@ -384,12 +673,302 @@ struct ImagesView: View {
         return text
     }
 
+    private func repositoryGroupRawSummary(_ group: ImageRepositoryGroup) -> String {
+        let payload: [String: JSONValue] = [
+            "repository": .string(group.displayName),
+            "registry": .string(group.registryIdentity.displayName),
+            "tags": .array(group.images.map { image in
+                .object([
+                    "reference": .string(image.reference),
+                    "tag": .string(image.referenceParts.tagDisplayName),
+                    "digest": .string(image.digest),
+                    "imageID": .string(image.id),
+                    "created": .string(image.createdText),
+                    "size": .string(image.sizeDisplay),
+                ])
+            }),
+        ]
+        guard let data = try? JSONEncoder.containerDesktop.encode(payload),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
+    }
+
+    private var deleteAlertTitle: String {
+        guard pendingDeleteRequest?.isBatch == true else {
+            return language.resolved == .zhHans ? "删除镜像？" : "Delete image?"
+        }
+        return language.resolved == .zhHans ? "删除所选镜像？" : "Delete selected images?"
+    }
+
+    private var deleteAlertMessage: String {
+        guard let request = pendingDeleteRequest else { return "" }
+        if request.isBatch {
+            let preview = request.references.prefix(6).joined(separator: "\n")
+            let remaining = max(request.references.count - 6, 0)
+            let suffix = remaining > 0
+                ? (language.resolved == .zhHans ? "\n另有 \(remaining) 个镜像。" : "\n\(remaining) more images.")
+                : ""
+            return language.resolved == .zhHans
+                ? "将删除 \(request.references.count) 个镜像。被容器引用的镜像可能无法删除。\n\(preview)\(suffix)"
+                : "This will delete \(request.references.count) images. Images used by containers may fail to delete.\n\(preview)\(suffix)"
+        }
+        let reference = request.references.first ?? (language.resolved == .zhHans ? "所选镜像" : "the selected image")
+        return language.resolved == .zhHans
+            ? "将删除镜像 \(reference)。被容器引用的镜像可能无法删除。"
+            : "This will delete image \(reference). Images used by containers may fail to delete."
+    }
+
+    private func deleteAlertButtonTitle(for request: ImageDeleteRequest) -> String {
+        if request.isBatch {
+            return language.resolved == .zhHans ? "删除 \(request.references.count) 个" : "Delete \(request.references.count)"
+        }
+        return language.t(.delete)
+    }
+
+    @ViewBuilder
+    private var filteredImagesSelectionButton: some View {
+        Button {
+            toggleFilteredImageSelection()
+        } label: {
+            Image(systemName: filteredImagesSelectionSystemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(imageListEntries.isEmpty ? .secondary : CDTheme.dockerBlue)
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .disabled(imageListEntries.isEmpty)
+        .help(filteredImagesSelectionHelp)
+    }
+
+    private var filteredImagesSelectionSystemImage: String {
+        if areAllFilteredImagesSelected { return "checkmark.square.fill" }
+        if hasFilteredImageSelection { return "minus.square.fill" }
+        return "square"
+    }
+
+    private var filteredImagesSelectionHelp: String {
+        if areAllFilteredImagesSelected {
+            return language.resolved == .zhHans ? "取消选择当前筛选结果" : "Deselect filtered images"
+        }
+        return language.resolved == .zhHans ? "选择当前筛选结果" : "Select filtered images"
+    }
+
+    @ViewBuilder
+    private func imageSelectionButton(for entry: ImageListEntry) -> some View {
+        let references = entry.references
+        let selectedCount = references.filter { selectedImageReferences.contains($0) }.count
+        let isSelected = !references.isEmpty && selectedCount == references.count
+        let isPartiallySelected = selectedCount > 0 && selectedCount < references.count
+        Button {
+            toggleImageSelection(references)
+        } label: {
+            Image(systemName: isSelected ? "checkmark.square.fill" : (isPartiallySelected ? "minus.square.fill" : "square"))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle((isSelected || isPartiallySelected) ? CDTheme.dockerBlue : .secondary)
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .help(isSelected
+            ? (language.resolved == .zhHans ? "取消选择镜像" : "Deselect image")
+            : (language.resolved == .zhHans ? "选择镜像" : "Select image"))
+    }
+
+    private func toggleImageSelection(_ references: [String]) {
+        let referenceSet = Set(references)
+        if referenceSet.isSubset(of: selectedImageReferences) {
+            selectedImageReferences.subtract(referenceSet)
+        } else {
+            selectedImageReferences.formUnion(referenceSet)
+        }
+    }
+
+    private func toggleFilteredImageSelection() {
+        if areAllFilteredImagesSelected {
+            selectedImageReferences.subtract(filteredImageReferenceSet)
+        } else {
+            selectedImageReferences.formUnion(filteredImageReferenceSet)
+        }
+    }
+
+    private func confirmDeleteSelectedImages() {
+        let references = selectedExistingImageReferences
+        guard !references.isEmpty else { return }
+        pendingDeleteRequest = ImageDeleteRequest(references: references, isBatch: true)
+    }
+
+    private func pruneSelectedImages() {
+        let existingReferences = Set(runtimeStore.images.map(\.reference))
+        selectedImageReferences.formIntersection(existingReferences)
+    }
+
+    private func pruneSelectedRegistryFilter() {
+        guard selectedRegistryFilter != ImageRegistryFilterOption.allID else { return }
+        let optionIDs = Set(registryFilterOptions.map(\.id))
+        if !optionIDs.contains(selectedRegistryFilter) {
+            selectedRegistryFilter = ImageRegistryFilterOption.allID
+        }
+    }
+
+    private func refreshImages() {
+        Task {
+            await runtimeStore.refreshAll()
+            pruneSelectedImages()
+        }
+    }
+
+    private func deleteImages(_ references: [String]) {
+        var seen = Set<String>()
+        let resolvedReferences = references
+            .map(\.trimmed)
+            .filter { reference in
+                guard !reference.isEmpty, !seen.contains(reference) else { return false }
+                seen.insert(reference)
+                return true
+            }
+        guard !resolvedReferences.isEmpty else { return }
+        let id = operationStore.start(
+            domain: .image,
+            title: language.resolved == .zhHans ? "批量删除镜像" : "Delete images",
+            target: "\(resolvedReferences.count) images",
+            commandPreview: imageDeleteCommandPreview(for: resolvedReferences)
+        )
+        Task {
+            let result = await runtimeStore.deleteImages(resolvedReferences)
+            selectedImageReferences.subtract(result.deletedReferences)
+            operationStore.finish(
+                id: id,
+                status: result.succeeded ? .succeeded : .failed,
+                output: result.output
+            )
+        }
+    }
+
+    private func imageDeleteCommandPreview(for references: [String]) -> String {
+        references
+            .map { AppOperationCommandPreview.make(executable: "container", arguments: ["image", "delete", $0]) }
+            .joined(separator: " && ")
+    }
+
+    private var allRegistriesTitle: String {
+        language.resolved == .zhHans ? "全部注册中心" : "All registries"
+    }
+
+    private var currentRegistryFilterTitle: String {
+        guard selectedRegistryFilter != ImageRegistryFilterOption.allID else {
+            return allRegistriesTitle
+        }
+        return registryFilterOptions.first { $0.id == selectedRegistryFilter }?.displayName ?? allRegistriesTitle
+    }
+
+    private var compactFilterSummary: String {
+        "\(imageListDisplayMode.fullTitle(language: language)) · \(currentRegistryFilterTitle)"
+    }
+
+    private var displayModeMenuButton: some View {
+        Menu {
+            displayModeMenuItems
+        } label: {
+            ImageToolbarMenuButton(
+                title: language.resolved == .zhHans ? "显示方式" : "Display",
+                value: imageListDisplayMode.fullTitle(language: language),
+                systemImage: "rectangle.grid.1x2"
+            )
+            .frame(width: 220)
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "选择镜像按 tag 展示或按仓库合并展示" : "Show images by tag or grouped by repository")
+    }
+
+    private var registryFilterMenuButton: some View {
+        Menu {
+            registryFilterMenuItems
+        } label: {
+            ImageToolbarMenuButton(
+                title: language.resolved == .zhHans ? "注册中心" : "Registry",
+                value: currentRegistryFilterTitle,
+                systemImage: "line.3.horizontal.decrease.circle"
+            )
+            .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "按镜像注册中心筛选：\(currentRegistryFilterTitle)" : "Filter by image registry: \(currentRegistryFilterTitle)")
+    }
+
+    private var compactFilterMenuButton: some View {
+        Menu {
+            Section(language.resolved == .zhHans ? "显示方式" : "Display") {
+                displayModeMenuItems
+            }
+            Section(language.resolved == .zhHans ? "注册中心" : "Registry") {
+                registryFilterMenuItems
+            }
+        } label: {
+            ImageToolbarMenuButton(
+                title: language.resolved == .zhHans ? "筛选" : "Filters",
+                value: compactFilterSummary,
+                systemImage: "line.3.horizontal.decrease.circle"
+            )
+            .frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "筛选镜像：\(compactFilterSummary)" : "Filter images: \(compactFilterSummary)")
+    }
+
+    @ViewBuilder
+    private var displayModeMenuItems: some View {
+        ForEach(ImageListDisplayMode.allCases) { mode in
+            Button {
+                imageListDisplayModeRaw = mode.rawValue
+            } label: {
+                menuCheckmarkLabel(
+                    mode.fullTitle(language: language),
+                    isSelected: imageListDisplayMode == mode
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var registryFilterMenuItems: some View {
+        Button {
+            selectedRegistryFilter = ImageRegistryFilterOption.allID
+        } label: {
+            menuCheckmarkLabel(
+                allRegistriesTitle,
+                isSelected: selectedRegistryFilter == ImageRegistryFilterOption.allID
+            )
+        }
+        ForEach(registryFilterOptions) { option in
+            Button {
+                selectedRegistryFilter = option.id
+            } label: {
+                menuCheckmarkLabel(
+                    option.displayName,
+                    isSelected: selectedRegistryFilter == option.id
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func menuCheckmarkLabel(_ title: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
+    }
+
     private var currentPullReference: String {
         useCustomPullReference ? customPullReference : pullReference
     }
 
     private var imageHeader: some View {
         HStack(spacing: 12) {
+            filteredImagesSelectionButton
+                .frame(width: 28)
             ResourceTableHeaderLabel(title: "", width: 20)
             ResourceTableHeaderLabel(title: language.t(.name))
             ResourceTableHeaderLabel(title: language.t(.tag), width: 120)
@@ -730,6 +1309,17 @@ struct ImagesView: View {
         buildContextPath = url.path
     }
 
+    private func prepareTagImage(_ image: ImageSummary) {
+        tagSource = image.reference
+        tagTarget = suggestedTagTarget(for: image.reference)
+        showTagPopover = true
+    }
+
+    private func preparePushImage(_ image: ImageSummary) {
+        pushReference = image.reference
+        showPushPopover = true
+    }
+
     private func prepareSaveImage(_ image: ImageSummary) {
         saveReferencesText = image.reference
         saveOutputPath = suggestedImageArchiveName(for: [image.reference])
@@ -842,14 +1432,14 @@ struct ImagesView: View {
             .path
     }
 
-    private func deleteImage(_ image: ImageSummary) {
+    private func deleteImage(_ reference: String) {
         runTrackedImageOperation(
             title: language.resolved == .zhHans ? "删除镜像" : "Delete image",
-            target: image.reference,
-            arguments: ["image", "delete", image.reference],
+            target: reference,
+            arguments: ["image", "delete", reference],
             usesImageStatus: false
         ) {
-            await runtimeStore.deleteImage(image.reference)
+            await runtimeStore.deleteImage(reference)
         }
     }
 
@@ -934,6 +1524,129 @@ private struct ImageDrawerOverview: View {
                 }
             }
         }
+    }
+}
+
+private struct ImageRepositoryGroupDrawerOverview: View {
+    @Environment(\.appLanguage) private var language
+    var group: ImageRepositoryGroup
+    var onOpenImage: (ImageSummary) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            DetailSection(title: language.resolved == .zhHans ? "仓库镜像" : "Repository") {
+                DetailInfoCard {
+                    DetailInfoRow(title: language.t(.name), value: group.displayName)
+                    DetailInfoRow(title: language.resolved == .zhHans ? "注册中心" : "Registry", value: group.registryIdentity.displayName)
+                    DetailInfoRow(title: language.resolved == .zhHans ? "Tag 数量" : "Tags", value: "\(group.tagCount)")
+                    DetailInfoRow(title: language.t(.imageID), value: group.imageIDText, monospaced: true)
+                    DetailInfoRow(title: language.t(.created), value: group.createdText)
+                    DetailInfoRow(title: language.t(.size), value: group.sizeDisplay)
+                }
+            }
+
+            DetailSection(title: language.resolved == .zhHans ? "Tag 列表" : "Tags") {
+                VStack(spacing: 0) {
+                    ForEach(group.images, id: \.reference) { image in
+                        ImageRepositoryTagRow(image: image) {
+                            onOpenImage(image)
+                        }
+                    }
+                }
+                .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(CDTheme.separator)
+                }
+            }
+        }
+    }
+}
+
+private struct ImageRepositoryTagRow: View {
+    @Environment(\.appLanguage) private var language
+    var image: ImageSummary
+    var onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 12) {
+                Image(systemName: "tag")
+                    .foregroundStyle(CDTheme.dockerBlue)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(image.referenceParts.tagDisplayName)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Text(image.reference)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(String(image.id.prefix(12)))
+                        .font(.caption.monospaced())
+                    Text(image.sizeDisplay)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 58)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "打开此 tag 的镜像详情" : "Open image details for this tag")
+
+        Divider()
+            .padding(.leading, 12)
+    }
+}
+
+private struct ImageToolbarMenuButton: View {
+    var title: String
+    var value: String
+    var systemImage: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CDTheme.dockerBlue)
+                .frame(width: 18)
+
+            Text(title)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Text(value)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(CDTheme.separator)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

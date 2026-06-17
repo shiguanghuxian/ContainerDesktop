@@ -26,6 +26,69 @@ struct RuntimeStoreContainerBatchTests {
     }
 
     @MainActor
+    @Test("deletes selected images and refreshes resources once")
+    func deletesSelectedImagesAndRefreshesOnce() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        let result = await store.deleteImages(["alpine:latest", "", "ubuntu:24.04", "alpine:latest"])
+
+        #expect(result.succeeded)
+        #expect(result.deletedReferences == ["alpine:latest", "ubuntu:24.04"])
+        #expect(result.output.contains("已删除 2 个镜像"))
+        #expect(store.imageOperationStatusIsError == false)
+        #expect(store.imageOperationStatusMessage?.contains("已删除 2 个镜像") == true)
+        #expect(store.operationFeedback?.phase == .succeeded)
+        #expect(store.operationFeedback?.message == "已删除镜像 2 个")
+
+        let log = try fake.commandLog()
+        #expect(log.contains("image delete alpine:latest\n"))
+        #expect(log.contains("image delete ubuntu:24.04\n"))
+        #expect(log.split(separator: "\n").filter { $0 == "image delete alpine:latest" }.count == 1)
+        #expect(log.split(separator: "\n").filter { $0 == "image list --format json" }.count == 1)
+    }
+
+    @MainActor
+    @Test("empty image batch delete does not call CLI")
+    func emptyImageBatchDeleteDoesNotCallCLI() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        let result = await store.deleteImages(["", "   "])
+
+        #expect(!result.succeeded)
+        #expect(result.deletedReferences.isEmpty)
+        #expect(result.output == "请选择要删除的镜像。")
+        #expect(store.imageOperationStatusIsError)
+        #expect(store.operationFeedback?.phase == .failed)
+        #expect((try? fake.commandLog()) == nil)
+    }
+
+    @MainActor
+    @Test("image batch delete reports partial failures")
+    func imageBatchDeleteReportsPartialFailures() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        let result = await store.deleteImages(["alpine:latest", "missing:latest", "busybox:latest"])
+
+        #expect(!result.succeeded)
+        #expect(result.deletedReferences == ["alpine:latest", "busybox:latest"])
+        #expect(result.output.contains("部分镜像删除失败"))
+        #expect(result.output.contains("missing:latest"))
+        #expect(result.output.contains("image is used by a container"))
+        #expect(store.imageOperationStatusIsError)
+        #expect(store.errorMessage?.contains("missing:latest") == true)
+        #expect(store.operationFeedback?.phase == .failed)
+
+        let log = try fake.commandLog()
+        #expect(log.contains("image delete alpine:latest\n"))
+        #expect(log.contains("image delete missing:latest\n"))
+        #expect(log.contains("image delete busybox:latest\n"))
+        #expect(log.split(separator: "\n").filter { $0 == "image list --format json" }.count == 1)
+    }
+
+    @MainActor
     @Test("operation feedback reports running and success states")
     func operationFeedbackReportsRunningAndSuccessStates() async throws {
         let fake = try FakeBatchContainerCLI()
@@ -442,6 +505,13 @@ private struct FakeBatchContainerCLI {
             ;;
           "machine logs -n 80 bad-machine")
             echo "/sbin.machine/init: 74: exec: /sbin/init: not found"
+            ;;
+          "image delete alpine:latest"|"image delete ubuntu:24.04"|"image delete busybox:latest")
+            echo "deleted"
+            ;;
+          "image delete missing:latest")
+            echo "image is used by a container" >&2
+            exit 74
             ;;
           "system status --format json")
             echo '{"status":"running"}'

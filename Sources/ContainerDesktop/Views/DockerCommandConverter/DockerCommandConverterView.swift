@@ -32,6 +32,13 @@ struct DockerCommandConverterView: View {
             ) {
                 HStack(spacing: 8) {
                     Button {
+                        ContainerDesktopWindowRouter.openDockerCompatibilityTerminal()
+                    } label: {
+                        Label(language.resolved == .zhHans ? "兼容终端" : "Terminal", systemImage: "terminal")
+                    }
+                    .help(DockerCompatibilityTerminalStrings.openTerminalHelp(language))
+
+                    Button {
                         copy(conversion.commandText, message: language.resolved == .zhHans ? "已复制转换结果" : "Converted command copied")
                     } label: {
                         Label(language.resolved == .zhHans ? "复制结果" : "Copy Result", systemImage: "doc.on.doc")

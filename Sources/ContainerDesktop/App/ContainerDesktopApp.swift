@@ -7,6 +7,13 @@ enum ContainerDesktopMain {
 
     @MainActor
     static func main() {
+        if DockerCommandShimCLI.runIfNeeded() {
+            return
+        }
+        if DockerCompatibilityTerminalApplication.runIfNeeded() {
+            return
+        }
+
         let app = NSApplication.shared
         let delegate = AppDelegate()
         appDelegate = delegate
@@ -17,7 +24,7 @@ enum ContainerDesktopMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     private static let mainWindowTitle = AppBranding.displayName
 
     private let runtimeStore = RuntimeStore()
@@ -31,6 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var mainHostingController: NSHostingController<AnyView>?
     private var settingsWindow: NSWindow?
     private var settingsHostingController: NSHostingController<AnyView>?
+    private var dockerCompatibilityTerminalWindow: NSWindow?
+    private var dockerCompatibilityTerminalHostingController: NSHostingController<AnyView>?
+    private var dockerCompatibilityTerminalTabsStore: DockerCompatibilityTerminalTabsStore?
+    private var dockerCompatibilityTerminalStyleSettingsWindow: NSWindow?
+    private var dockerCompatibilityTerminalStyleSettingsHostingController: NSHostingController<AnyView>?
     private var statusItem: NSStatusItem?
     private var statusPopover: NSPopover?
     private var statusPopoverEventMonitor: Any?
@@ -38,13 +50,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var lastChromePreferences: AppChromePreferences?
 
     private var appearance: AppearancePreference {
-        let rawValue = UserDefaults.standard.string(forKey: "containerdesktop.appearance")
+        let rawValue = UserDefaults.containerDesktopShared.string(forKey: "containerdesktop.appearance")
             ?? AppearancePreference.system.rawValue
         return AppearancePreference(rawValue: rawValue) ?? .system
     }
 
     private var language: AppLanguage {
-        let rawValue = UserDefaults.standard.string(forKey: "containerdesktop.language")
+        let rawValue = UserDefaults.containerDesktopShared.string(forKey: "containerdesktop.language")
             ?? AppLanguage.system.rawValue
         return AppLanguage(rawValue: rawValue) ?? .system
     }
@@ -60,17 +72,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.servicesProvider = self
         ContainerDesktopMainWindow.configureOpenAction { [weak self] in
             self?.openMainWindow()
         }
-        ContainerDesktopWindowRouter.configure(openSettings: { [weak self] in
-            self?.openSettingsWindow()
-        })
+        ContainerDesktopWindowRouter.configure(
+            openSettings: { [weak self] in
+                self?.openSettingsWindow()
+            },
+            openDockerCompatibilityTerminal: { [weak self] in
+                self?.openDockerCompatibilityTerminalAppOrWindow()
+            },
+            openDockerCompatibilityTerminalStyleSettings: { [weak self] in
+                self?.openDockerCompatibilityTerminalStyleSettingsWindow()
+            }
+        )
         lastChromePreferences = currentChromePreferences
         observeUserDefaults()
         configureStatusItem()
         openMainWindow()
         loadInitialData()
+        NSUpdateDynamicServices()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -92,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             NotificationCenter.default.removeObserver(userDefaultsObserver)
         }
         statsHistoryStore.shutdown()
+        dockerCompatibilityTerminalTabsStore?.stopAll()
         removeStatusPopoverEventMonitor()
     }
 
@@ -151,6 +174,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window.orderFrontRegardless()
     }
 
+    private func openDockerCompatibilityTerminalAppOrWindow(
+        workingDirectory: URL = AppPaths.homeDirectory,
+        addTabIfWindowExists: Bool = false
+    ) {
+        if DockerCompatibilityTerminalEmbeddedApp.open(workingDirectory: workingDirectory) {
+            return
+        }
+        openDockerCompatibilityTerminalWindow(
+            workingDirectory: workingDirectory,
+            addTabIfWindowExists: addTabIfWindowExists
+        )
+    }
+
+    private func openDockerCompatibilityTerminalWindow(
+        workingDirectory: URL = AppPaths.homeDirectory,
+        addTabIfWindowExists: Bool = false
+    ) {
+        if let dockerCompatibilityTerminalWindow {
+            if let tabsStore = dockerCompatibilityTerminalTabsStore {
+                if addTabIfWindowExists || tabsStore.tabs.isEmpty {
+                    tabsStore.newTab(workingDirectory: workingDirectory)
+                }
+            } else {
+                let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: workingDirectory)
+                dockerCompatibilityTerminalTabsStore = tabsStore
+                dockerCompatibilityTerminalHostingController?.rootView = dockerCompatibilityTerminalRootView(tabsStore: tabsStore)
+            }
+            refreshDockerCompatibilityTerminalWindow()
+            NSApp.activate(ignoringOtherApps: true)
+            dockerCompatibilityTerminalWindow.makeKeyAndOrderFront(nil)
+            dockerCompatibilityTerminalWindow.orderFrontRegardless()
+            return
+        }
+
+        let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: workingDirectory)
+        dockerCompatibilityTerminalTabsStore = tabsStore
+        let hostingController = NSHostingController(rootView: dockerCompatibilityTerminalRootView(tabsStore: tabsStore))
+        hostingController.sizingOptions = []
+        let window = DockerCompatibilityTerminalWindow(contentViewController: hostingController)
+        window.title = dockerCompatibilityTerminalWindowTitle
+        window.identifier = NSUserInterfaceItemIdentifier("io.shiguanghuxian.containerdesktop.docker-compatibility-terminal-window")
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.minSize = NSSize(width: 900, height: 560)
+        window.setContentSize(NSSize(width: 1180, height: 720))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+
+        dockerCompatibilityTerminalWindow = window
+        dockerCompatibilityTerminalHostingController = hostingController
+        configureDockerCompatibilityTerminalTabKeyCommands(on: window)
+        applyAppearance(to: window)
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
+    private func openDockerCompatibilityTerminalStyleSettingsWindow() {
+        if let dockerCompatibilityTerminalStyleSettingsWindow {
+            refreshDockerCompatibilityTerminalStyleSettingsWindow()
+            NSApp.activate(ignoringOtherApps: true)
+            dockerCompatibilityTerminalStyleSettingsWindow.makeKeyAndOrderFront(nil)
+            dockerCompatibilityTerminalStyleSettingsWindow.orderFrontRegardless()
+            return
+        }
+
+        let hostingController = NSHostingController(rootView: dockerCompatibilityTerminalStyleSettingsRootView())
+        hostingController.sizingOptions = []
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = dockerCompatibilityTerminalStyleSettingsWindowTitle
+        window.identifier = NSUserInterfaceItemIdentifier("io.shiguanghuxian.containerdesktop.docker-compatibility-terminal-style-settings-window")
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.minSize = NSSize(width: 820, height: 520)
+        window.setContentSize(NSSize(width: 860, height: 560))
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        dockerCompatibilityTerminalStyleSettingsWindow = window
+        dockerCompatibilityTerminalStyleSettingsHostingController = hostingController
+        applyAppearance(to: window)
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
@@ -202,6 +312,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         configureMainMenu()
         refreshMainWindow()
         refreshSettingsWindow()
+        refreshDockerCompatibilityTerminalWindow()
+        refreshDockerCompatibilityTerminalStyleSettingsWindow()
         refreshStatusItem()
         if statusPopover?.isShown == true {
             refreshStatusPopover()
@@ -222,6 +334,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 },
                 openSettings: {
                     ContainerDesktopWindowRouter.openSettings()
+                },
+                openDockerCompatibilityTerminal: {
+                    self.openDockerCompatibilityTerminalAppOrWindow()
                 },
                 checkForUpdates: {
                     UserDefaults.standard.set(AppSection.about.rawValue, forKey: "containerdesktop.selected.section")
@@ -251,6 +366,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         settingsWindow?.title = language.t(.settings)
         settingsHostingController?.rootView = settingsRootView()
         applyAppearance(to: settingsWindow)
+    }
+
+    private func refreshDockerCompatibilityTerminalWindow() {
+        dockerCompatibilityTerminalWindow?.title = dockerCompatibilityTerminalWindowTitle
+        if let tabsStore = dockerCompatibilityTerminalTabsStore {
+            dockerCompatibilityTerminalHostingController?.rootView = dockerCompatibilityTerminalRootView(tabsStore: tabsStore)
+        }
+        applyAppearance(to: dockerCompatibilityTerminalWindow)
+    }
+
+    private func refreshDockerCompatibilityTerminalStyleSettingsWindow() {
+        dockerCompatibilityTerminalStyleSettingsWindow?.title = dockerCompatibilityTerminalStyleSettingsWindowTitle
+        dockerCompatibilityTerminalStyleSettingsHostingController?.rootView = dockerCompatibilityTerminalStyleSettingsRootView()
+        applyAppearance(to: dockerCompatibilityTerminalStyleSettingsWindow)
     }
 
     private func refreshStatusItem() {
@@ -323,6 +452,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         )
     }
 
+    private func dockerCompatibilityTerminalRootView(tabsStore: DockerCompatibilityTerminalTabsStore) -> AnyView {
+        AnyView(
+            DockerCompatibilityTerminalTabsView(
+                tabsStore: tabsStore,
+                onOpenStyleSettings: {
+                    ContainerDesktopWindowRouter.openDockerCompatibilityTerminalStyleSettings()
+                },
+                onCloseWindow: { [weak self] in
+                    self?.dockerCompatibilityTerminalWindow?.performClose(nil)
+                }
+            )
+                .environment(\.appLanguage, language)
+                .preferredColorScheme(appearance.colorScheme)
+        )
+    }
+
+    private var dockerCompatibilityTerminalWindowTitle: String {
+        DockerCompatibilityTerminalStrings.windowTitle(language)
+    }
+
+    private func dockerCompatibilityTerminalStyleSettingsRootView() -> AnyView {
+        AnyView(
+            DockerCompatibilityTerminalSettingsView()
+                .environment(\.appLanguage, language)
+                .preferredColorScheme(appearance.colorScheme)
+        )
+    }
+
+    private var dockerCompatibilityTerminalStyleSettingsWindowTitle: String {
+        DockerCompatibilityTerminalStrings.settingsWindowTitle(language)
+    }
+
+    private func configureDockerCompatibilityTerminalTabKeyCommands(on window: DockerCompatibilityTerminalWindow) {
+        window.onNewTab = { [weak self] in
+            self?.newDockerCompatibilityTerminalTab()
+        }
+        window.onCloseTab = { [weak self] in
+            self?.closeSelectedDockerCompatibilityTerminalTab()
+        }
+        window.onSelectNextTab = { [weak self] in
+            self?.dockerCompatibilityTerminalTabsStore?.selectNextTab()
+        }
+        window.onSelectPreviousTab = { [weak self] in
+            self?.dockerCompatibilityTerminalTabsStore?.selectPreviousTab()
+        }
+    }
+
+    private func newDockerCompatibilityTerminalTab() {
+        if let tabsStore = dockerCompatibilityTerminalTabsStore {
+            tabsStore.newTab()
+            return
+        }
+        openDockerCompatibilityTerminalWindow()
+    }
+
+    private func closeSelectedDockerCompatibilityTerminalTab() {
+        guard let tabsStore = dockerCompatibilityTerminalTabsStore else {
+            dockerCompatibilityTerminalWindow?.performClose(nil)
+            return
+        }
+        if tabsStore.closeSelectedTab() == .closedLastTab {
+            dockerCompatibilityTerminalWindow?.performClose(nil)
+        }
+    }
+
     private func applyAppearance(to window: NSWindow?) {
         switch appearance {
         case .system:
@@ -386,6 +580,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             NSEvent.removeMonitor(statusPopoverEventMonitor)
             self.statusPopoverEventMonitor = nil
         }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === dockerCompatibilityTerminalWindow
+        else {
+            return
+        }
+        dockerCompatibilityTerminalTabsStore?.stopAll()
+        dockerCompatibilityTerminalTabsStore = nil
+        dockerCompatibilityTerminalHostingController = nil
+        dockerCompatibilityTerminalWindow = nil
+    }
+
+    @objc func openDockerCompatibilityTerminal(
+        _ pasteboard: NSPasteboard,
+        userData: String,
+        error: AutoreleasingUnsafeMutablePointer<NSString?>
+    ) {
+        guard let workingDirectory = DockerCompatibilityTerminalServiceRequest.workingDirectory(from: pasteboard) else {
+            error.pointee = DockerCompatibilityTerminalStrings.invalidServiceSelection(language) as NSString
+            return
+        }
+        openDockerCompatibilityTerminalAppOrWindow(
+            workingDirectory: workingDirectory,
+            addTabIfWindowExists: true
+        )
     }
 }
 

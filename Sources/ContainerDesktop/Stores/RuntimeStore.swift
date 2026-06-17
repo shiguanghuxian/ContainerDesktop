@@ -579,6 +579,77 @@ final class RuntimeStore {
         }
     }
 
+    @discardableResult
+    func deleteImages(_ references: [String]) async -> (succeeded: Bool, deletedReferences: [String], output: String) {
+        var seen = Set<String>()
+        let resolvedReferences = references
+            .map(\.trimmed)
+            .filter { reference in
+                guard !reference.isEmpty, !seen.contains(reference) else { return false }
+                seen.insert(reference)
+                return true
+            }
+
+        guard !resolvedReferences.isEmpty else {
+            let message = "请选择要删除的镜像。"
+            imageOperationStatusMessage = message
+            imageOperationStatusIsError = true
+            errorMessage = message
+            showOperationFeedback(message, phase: .failed, autoDismissAfter: 6)
+            return (false, [], message)
+        }
+
+        guard !isImageOperationRunning else {
+            let message = "已有镜像操作正在执行。"
+            imageOperationStatusMessage = message
+            imageOperationStatusIsError = true
+            errorMessage = message
+            return (false, [], message)
+        }
+
+        let message = "删除镜像 \(resolvedReferences.count) 个"
+        isImageOperationRunning = true
+        busyMessage = message
+        errorMessage = nil
+        imageOperationStatusMessage = nil
+        imageOperationStatusIsError = false
+        showOperationFeedback(runningOperationMessage(for: message), phase: .running)
+        defer {
+            isImageOperationRunning = false
+            busyMessage = nil
+        }
+
+        var deletedReferences: [String] = []
+        var failures: [String] = []
+        for reference in resolvedReferences {
+            do {
+                try await client.deleteImage(reference)
+                deletedReferences.append(reference)
+            } catch {
+                failures.append("\(reference): \(error.localizedDescription)")
+            }
+        }
+
+        await refreshAll()
+
+        if failures.isEmpty {
+            let output = "已删除 \(deletedReferences.count) 个镜像：\(deletedReferences.joined(separator: ", "))"
+            imageOperationStatusMessage = output
+            imageOperationStatusIsError = false
+            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3)
+            return (true, deletedReferences, output)
+        }
+
+        let summary = deletedReferences.isEmpty
+            ? "删除镜像失败：\(failures.joined(separator: "\n"))"
+            : "部分镜像删除失败。已删除 \(deletedReferences.count) 个，失败 \(failures.count) 个：\n\(failures.joined(separator: "\n"))"
+        imageOperationStatusMessage = summary
+        imageOperationStatusIsError = true
+        errorMessage = summary
+        showOperationFeedback(failedOperationMessage(for: message), phase: .failed, autoDismissAfter: 6)
+        return (false, deletedReferences, summary)
+    }
+
     func pruneDanglingImages() async {
         await performImageOperation("清理 dangling 镜像") {
             try await client.pruneDanglingImages()
@@ -834,6 +905,10 @@ final class RuntimeStore {
         await inspect(title: "Network \(name)") {
             try await client.inspectNetwork(name)
         }
+    }
+
+    func loadNetworkInspect(name: String) async throws -> String {
+        try await client.inspectNetwork(name).prettyString
     }
 
     func loadContainerLogs(_ id: String, boot: Bool = false) async {

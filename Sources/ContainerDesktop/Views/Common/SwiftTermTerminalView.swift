@@ -2,16 +2,26 @@ import AppKit
 import SwiftTerm
 import SwiftUI
 
+struct TerminalContextMenuAction {
+    var title: String
+    var isEnabled = true
+    var action: () -> Void
+}
+
 struct SwiftTermTerminalView: NSViewRepresentable {
     var textSnapshot: String
     var outputEvents: [TerminalOutputEvent]
     var outputSequence: Int
     var resetSequence: Int
     var isInputEnabled = true
+    var style: TerminalStyleConfiguration = .containerDefault
+    var language: AppLanguage = .system
+    var contextMenuActions: [TerminalContextMenuAction] = []
+    var onSizeChange: (Int, Int) -> Void = { _, _ in }
     var onInput: (Data) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onInput: onInput)
+        Coordinator(onInput: onInput, onSizeChange: onSizeChange)
     }
 
     func makeNSView(context: Context) -> FocusableTerminalView {
@@ -19,22 +29,22 @@ struct SwiftTermTerminalView: NSViewRepresentable {
         terminalView.terminalDelegate = context.coordinator
         terminalView.autoresizingMask = [.width, .height]
         terminalView.caretViewTracksFocus = false
-        terminalView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        terminalView.nativeForegroundColor = NSColor(calibratedRed: 0.82, green: 0.94, blue: 0.88, alpha: 1)
-        terminalView.nativeBackgroundColor = NSColor(calibratedRed: 0.035, green: 0.045, blue: 0.055, alpha: 1)
-        terminalView.caretColor = .white
-        terminalView.caretTextColor = terminalView.nativeBackgroundColor
+        terminalView.language = language
+        terminalView.contextMenuActions = contextMenuActions
+        terminalView.apply(style: style)
         terminalView.setInputEnabled(isInputEnabled)
         context.coordinator.terminalView = terminalView
         context.coordinator.isInputEnabled = isInputEnabled
-        let clickRecognizer = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.focusTerminal))
-        terminalView.addGestureRecognizer(clickRecognizer)
         return terminalView
     }
 
     func updateNSView(_ terminalView: FocusableTerminalView, context: Context) {
         context.coordinator.onInput = onInput
+        context.coordinator.onSizeChange = onSizeChange
         context.coordinator.isInputEnabled = isInputEnabled
+        terminalView.language = language
+        terminalView.contextMenuActions = contextMenuActions
+        terminalView.apply(style: style)
         terminalView.setInputEnabled(isInputEnabled)
         context.coordinator.feed(
             terminalView,
@@ -47,6 +57,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
 
     final class Coordinator: NSObject, TerminalViewDelegate {
         var onInput: (Data) -> Void
+        var onSizeChange: (Int, Int) -> Void
         var isInputEnabled = true
         weak var terminalView: TerminalView?
         private var lastOutputSequence = 0
@@ -55,8 +66,9 @@ struct SwiftTermTerminalView: NSViewRepresentable {
         private(set) var terminalColumns = 0
         private(set) var terminalRows = 0
 
-        init(onInput: @escaping (Data) -> Void) {
+        init(onInput: @escaping (Data) -> Void, onSizeChange: @escaping (Int, Int) -> Void) {
             self.onInput = onInput
+            self.onSizeChange = onSizeChange
         }
 
         @objc @MainActor func focusTerminal() {
@@ -95,26 +107,33 @@ struct SwiftTermTerminalView: NSViewRepresentable {
 
             guard outputSequence != lastOutputSequence else { return }
             let pendingEvents = outputEvents.filter { $0.sequence > lastOutputSequence }
-            guard let firstEvent = pendingEvents.first,
-                  firstEvent.sequence == lastOutputSequence + 1 else {
-                reset(
-                    terminalView,
-                    textSnapshot: textSnapshot,
-                    outputSequence: outputSequence,
-                    resetSequence: resetSequence
-                )
+            guard !pendingEvents.isEmpty else {
+                lastOutputSequence = outputSequence
                 return
             }
 
-            for event in pendingEvents {
-                terminalView.feed(text: event.text)
+            if let firstEvent = pendingEvents.first,
+               firstEvent.sequence > lastOutputSequence + 1 {
+                skippedOutputGapCount += 1
+                lastOutputSequence = firstEvent.sequence - 1
             }
-            lastOutputSequence = pendingEvents.last?.sequence ?? lastOutputSequence
+
+            for event in pendingEvents {
+                guard event.sequence > lastOutputSequence else { continue }
+                terminalView.feed(text: event.text)
+                lastOutputSequence = event.sequence
+            }
         }
 
+        private(set) var resetCount = 0
+        private(set) var skippedOutputGapCount = 0
+
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            guard newCols > 0, newRows > 0 else { return }
+            guard newCols != terminalColumns || newRows != terminalRows else { return }
             terminalColumns = newCols
             terminalRows = newRows
+            onSizeChange(newCols, newRows)
         }
 
         func setTerminalTitle(source: TerminalView, title: String) {}
@@ -154,6 +173,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
             outputSequence: Int,
             resetSequence: Int
         ) {
+            resetCount += 1
             terminalView.feed(text: "\u{1B}[2J\u{1B}[3J\u{1B}[H")
             if !textSnapshot.isEmpty {
                 terminalView.feed(text: textSnapshot)
@@ -166,8 +186,26 @@ struct SwiftTermTerminalView: NSViewRepresentable {
 }
 
 final class FocusableTerminalView: TerminalView {
+    var language: AppLanguage = .system
+    var contextMenuActions: [TerminalContextMenuAction] = []
     private var didRequestInitialFocus = false
     private var inputEnabled = true
+    private var currentStyle: TerminalStyleConfiguration?
+    private(set) var styleApplicationCount = 0
+
+    func apply(style: TerminalStyleConfiguration) {
+        guard currentStyle != style else { return }
+        currentStyle = style
+        styleApplicationCount += 1
+        font = NSFont.monospacedSystemFont(ofSize: style.fontSize, weight: .regular)
+        nativeForegroundColor = style.foreground.nsColor
+        nativeBackgroundColor = style.background.nsColor
+        caretColor = style.caret.nsColor
+        caretTextColor = style.caretText.nsColor
+        selectedTextBackgroundColor = style.selection.nsColor
+        layer?.backgroundColor = style.background.nsColor.cgColor
+        setNeedsDisplay(bounds)
+    }
 
     func setInputEnabled(_ enabled: Bool) {
         inputEnabled = enabled
@@ -184,5 +222,77 @@ final class FocusableTerminalView: TerminalView {
             guard let self, self.inputEnabled else { return }
             self.window?.makeFirstResponder(self)
         }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        focusIfInputEnabled()
+        guard let menu = menu(for: event) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        for action in contextMenuActions {
+            let item = NSMenuItem(title: action.title, action: #selector(performContextMenuAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = action.isEnabled
+            item.representedObject = TerminalContextMenuActionBox(action.action)
+            menu.addItem(item)
+        }
+
+        if !contextMenuActions.isEmpty {
+            menu.addItem(.separator())
+        }
+
+        let copyItem = NSMenuItem(title: DockerCompatibilityTerminalStrings.copy(language), action: #selector(copy(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.isEnabled = selectionActive
+        menu.addItem(copyItem)
+
+        let pasteItem = NSMenuItem(title: DockerCompatibilityTerminalStrings.paste(language), action: #selector(paste(_:)), keyEquivalent: "")
+        pasteItem.target = self
+        pasteItem.isEnabled = inputEnabled && NSPasteboard.general.string(forType: .string) != nil
+        menu.addItem(pasteItem)
+
+        let selectAllItem = NSMenuItem(title: DockerCompatibilityTerminalStrings.selectAll(language), action: #selector(selectAll(_:)), keyEquivalent: "")
+        selectAllItem.target = self
+        menu.addItem(selectAllItem)
+
+        if selectionActive {
+            menu.addItem(.separator())
+            let clearSelectionItem = NSMenuItem(title: DockerCompatibilityTerminalStrings.clearSelection(language), action: #selector(clearSelectionFromMenu(_:)), keyEquivalent: "")
+            clearSelectionItem.target = self
+            menu.addItem(clearSelectionItem)
+        }
+
+        return menu
+    }
+
+    @objc private func performContextMenuAction(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? TerminalContextMenuActionBox else { return }
+        box.action()
+    }
+
+    @objc private func clearSelectionFromMenu(_ sender: Any?) {
+        selectNone()
+        setNeedsDisplay(bounds)
+    }
+
+    private func focusIfInputEnabled() {
+        guard inputEnabled else { return }
+        window?.makeFirstResponder(self)
+    }
+}
+
+private final class TerminalContextMenuActionBox {
+    let action: () -> Void
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
     }
 }

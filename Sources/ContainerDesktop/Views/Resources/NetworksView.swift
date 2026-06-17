@@ -9,6 +9,7 @@ struct NetworksView: View {
     @State private var subnetV6 = ""
     @State private var internalOnly = false
     @State private var showCreatePopover = false
+    @State private var detailName: String?
     @State private var selectedName: String?
     @State private var pendingDelete: NetworkSummary?
     @State private var drawerMode: DetailDrawerMode = .overview
@@ -17,7 +18,9 @@ struct NetworksView: View {
         let query = searchText.trimmed.lowercased()
         guard !query.isEmpty else { return runtimeStore.networks }
         return runtimeStore.networks.filter {
-            $0.name.lowercased().contains(query) || $0.subnetText.lowercased().contains(query)
+            $0.name.lowercased().contains(query)
+                || $0.ipv4ConfigurationText.lowercased().contains(query)
+                || $0.ipv6ConfigurationText.lowercased().contains(query)
         }
     }
 
@@ -26,24 +29,44 @@ struct NetworksView: View {
         return runtimeStore.networks.first { $0.name == selectedName }
     }
 
+    private var isDetailPresented: Binding<Bool> {
+        Binding(
+            get: { detailName != nil },
+            set: { if !$0 { detailName = nil } }
+        )
+    }
+
     var body: some View {
-        DrawerPageLayout(isDrawerPresented: selectedNetwork != nil, onDismiss: {
-            selectedName = nil
-        }) {
-            pageContent
-        } drawer: {
-            if let selectedNetwork {
-                DetailDrawer(
-                    mode: $drawerMode,
-                    title: selectedNetwork.name,
-                    subtitle: "container network inspect",
-                    systemImage: "network",
-                    rawText: runtimeStore.selectedInspectorText,
-                    onClose: {
-                        selectedName = nil
+        Group {
+            if let detailName {
+                NetworkDetailPage(
+                    runtimeStore: runtimeStore,
+                    name: detailName,
+                    isPresented: isDetailPresented
+                )
+            } else {
+                DrawerPageLayout(isDrawerPresented: selectedNetwork != nil, onDismiss: {
+                    selectedName = nil
+                }) {
+                    pageContent
+                } drawer: {
+                    if let selectedNetwork {
+                        DetailDrawer(
+                            mode: $drawerMode,
+                            title: selectedNetwork.name,
+                            subtitle: "container network inspect",
+                            systemImage: "network",
+                            rawText: runtimeStore.selectedInspectorText,
+                            onClose: {
+                                selectedName = nil
+                            }
+                        ) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                NetworkOverviewTabView(network: selectedNetwork)
+                                NetworkMetadataTabView(network: selectedNetwork)
+                            }
+                        }
                     }
-                ) {
-                    NetworkDetailOverview(network: selectedNetwork)
                 }
             }
         }
@@ -109,31 +132,9 @@ struct NetworksView: View {
                     networkHeader
                 } rows: {
                     ForEach(filteredNetworks) { network in
-                        ResourceTableRow(isSelected: selectedName == network.name) {
+                        ResourceTableRow(isSelected: selectedName == network.name || detailName == network.name) {
                             let deleteKey = RuntimeOperationKey.networkDelete(network.name)
-                            ResourceStatusDot(tint: .orange)
-
-                            Text(network.name)
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            StatusPill(title: network.configuration.mode, systemImage: "link", tint: .orange)
-                                .frame(width: 110, alignment: .leading)
-
-                            Text(network.subnetText)
-                                .font(.callout.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .frame(width: 170, alignment: .leading)
-
-                            Text(network.configuration.plugin)
-                                .lineLimit(1)
-                                .frame(width: 120, alignment: .leading)
-
-                            Text(network.createdText)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 140, alignment: .leading)
+                            networkRowMainButton(network)
 
                             HStack(spacing: 8) {
                                 RowActionButton(
@@ -156,6 +157,46 @@ struct NetworksView: View {
                 }
             }
         }
+    }
+
+    private func networkRowMainButton(_ network: NetworkSummary) -> some View {
+        Button {
+            openNetworkDetail(network)
+        } label: {
+            HStack(spacing: 12) {
+                ResourceStatusDot(tint: .orange)
+
+                Text(network.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                StatusPill(title: network.configuration.mode, systemImage: "link", tint: .orange)
+                    .frame(width: 110, alignment: .leading)
+
+                Text(network.ipv4ConfigurationText)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 170, alignment: .leading)
+
+                Text(network.configuration.plugin)
+                    .lineLimit(1)
+                    .frame(width: 120, alignment: .leading)
+
+                Text(network.createdText)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 140, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "打开网络详情" : "Open network details")
+    }
+
+    private func openNetworkDetail(_ network: NetworkSummary) {
+        selectedName = nil
+        detailName = network.name
     }
 
     private func selectNetwork(_ network: NetworkSummary) {
@@ -214,42 +255,6 @@ struct NetworksView: View {
             ResourceTableHeaderLabel(title: language.t(.plugin), width: 120)
             ResourceTableHeaderLabel(title: language.t(.created), width: 140)
             ResourceTableHeaderLabel(title: language.t(.actions), width: 78, alignment: .trailing)
-        }
-    }
-}
-
-private struct NetworkDetailOverview: View {
-    @Environment(\.appLanguage) private var language
-    var network: NetworkSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            DetailSection(title: language.resolved == .zhHans ? "网络" : "Network") {
-                DetailInfoCard {
-                    DetailInfoRow(title: language.t(.name), value: network.name)
-                    DetailInfoRow(title: language.t(.mode), value: network.configuration.mode)
-                    DetailInfoRow(title: language.t(.plugin), value: network.configuration.plugin)
-                    DetailInfoRow(title: language.t(.subnet), value: network.subnetText, monospaced: true)
-                    DetailInfoRow(title: "IPv6", value: network.configuration.ipv6Subnet ?? "—", monospaced: true)
-                    DetailInfoRow(title: language.t(.created), value: network.createdText)
-                }
-            }
-
-            DetailSection(title: "Metadata") {
-                DetailInfoCard {
-                    if network.configuration.labels.isEmpty && network.configuration.options.isEmpty {
-                        Text(language.resolved == .zhHans ? "没有标签或插件选项。" : "No labels or plugin options.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(network.configuration.labels.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                            DetailInfoRow(title: key, value: value)
-                        }
-                        ForEach(network.configuration.options.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                            DetailInfoRow(title: key, value: value)
-                        }
-                    }
-                }
-            }
         }
     }
 }

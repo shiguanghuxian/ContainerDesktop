@@ -44,4 +44,19 @@ enum AppPaths {
         appConfigDirectory
             .appending(path: "app-update-cache")
     }
+
+    static var dockerCompatibilityDirectory: URL {
+        appConfigDirectory
+            .appending(path: "docker-compatibility")
+    }
+
+    static var dockerCompatibilityShimBinDirectory: URL {
+        dockerCompatibilityDirectory
+            .appending(path: "bin")
+    }
+
+    static var dockerCompatibilityShellDirectory: URL {
+        dockerCompatibilityDirectory
+            .appending(path: "shell")
+    }
 }

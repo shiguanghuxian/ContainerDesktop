@@ -82,6 +82,8 @@ final class MachineDetailStore {
     }
 
     @ObservationIgnored private var terminalSession: ContainerTerminalSession?
+    @ObservationIgnored private var terminalColumns = 80
+    @ObservationIgnored private var terminalRows = 24
 
     func bootstrap() async {
         await refreshInspect()
@@ -294,6 +296,7 @@ final class MachineDetailStore {
         do {
             let session = try await client.makeMachineShellSession(id: machineID, shell: "sh")
             terminalSession = session
+            session.resize(columns: terminalColumns, rows: terminalRows)
             try session.start { [weak self] chunk in
                 Task { @MainActor in
                     self?.appendTerminalChunk(chunk)
@@ -316,6 +319,12 @@ final class MachineDetailStore {
     func sendTerminalInputData(_ data: Data) {
         guard terminalState.isConnected else { return }
         terminalSession?.send(data)
+    }
+
+    func resizeTerminal(columns: Int, rows: Int) {
+        terminalColumns = columns
+        terminalRows = rows
+        terminalSession?.resize(columns: columns, rows: rows)
     }
 
     func clearTerminal() {

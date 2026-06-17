@@ -236,62 +236,13 @@ enum DockerCommandConverter {
         return DockerCommandConversionResult(status: status, commands: commands, notes: notes)
     }
 
+    static func convertInvocation(executable: String, arguments: [String]) -> DockerCommandConversionResult {
+        convertTokens([executable] + arguments)
+    }
+
     private static func convertLine(_ line: String) -> DockerCommandConversionResult {
         do {
-            var tokens = try CommandLineTokenizer.split(line)
-            guard !tokens.isEmpty else { return .empty }
-
-            var notes: [String] = []
-            if tokens.first == "sudo" {
-                tokens.removeFirst()
-                notes.append("已移除 sudo；container 通常不需要用 sudo 执行。")
-            }
-
-            guard let executable = tokens.first else { return .empty }
-            tokens.removeFirst()
-
-            if executable == "container" || executable == "container-compose" {
-                return .init(
-                    status: .warning,
-                    commands: [.init(executable: executable, arguments: tokens)],
-                    notes: notes + ["输入已经是 apple/container 命令，保持不变。"]
-                )
-            }
-
-            if executable == "docker-compose" {
-                return .init(
-                    status: .warning,
-                    commands: [.init(executable: "container-compose", arguments: tokens)],
-                    notes: notes + ["Docker Compose 已转换为 container-compose；请确认本机已安装 container-compose。"]
-                )
-            }
-
-            guard executable == "docker" else {
-                return .init(
-                    status: .unsupported,
-                    commands: [],
-                    notes: notes + ["目前只支持 docker、docker-compose、container 和 container-compose 命令。"]
-                )
-            }
-
-            let stripped = stripDockerGlobalOptions(tokens)
-            notes.append(contentsOf: stripped.notes)
-            tokens = stripped.arguments
-
-            guard !tokens.isEmpty else {
-                return .init(status: .unsupported, commands: [], notes: notes + ["缺少 docker 子命令。"])
-            }
-
-            if tokens.first == "compose" {
-                tokens.removeFirst()
-                return .init(
-                    status: .warning,
-                    commands: [.init(executable: "container-compose", arguments: tokens)],
-                    notes: notes + ["Docker Compose 已转换为 container-compose；请确认本机已安装 container-compose。"]
-                )
-            }
-
-            return mapDockerSubcommand(tokens, notes: notes)
+            return convertTokens(try CommandLineTokenizer.split(line))
         } catch {
             return .init(
                 status: .invalid,
@@ -301,12 +252,104 @@ enum DockerCommandConverter {
         }
     }
 
+    private static func convertTokens(_ inputTokens: [String]) -> DockerCommandConversionResult {
+        var tokens = inputTokens
+        guard !tokens.isEmpty else { return .empty }
+
+        var notes: [String] = []
+        if tokens.first == "sudo" {
+            tokens.removeFirst()
+            notes.append("已移除 sudo；container 通常不需要用 sudo 执行。")
+        }
+
+        guard let executable = tokens.first else { return .empty }
+        tokens.removeFirst()
+
+        if executable == "container" || executable == "container-compose" {
+            return .init(
+                status: .warning,
+                commands: [.init(executable: executable, arguments: tokens)],
+                notes: notes + ["输入已经是 apple/container 命令，保持不变。"]
+            )
+        }
+
+        if executable == "docker-compose" {
+            return .init(
+                status: .warning,
+                commands: [.init(executable: "container-compose", arguments: tokens)],
+                notes: notes + ["Docker Compose 已转换为 container-compose；请确认本机已安装 container-compose。"]
+            )
+        }
+
+        guard executable == "docker" else {
+            return .init(
+                status: .unsupported,
+                commands: [],
+                notes: notes + ["目前只支持 docker、docker-compose、container 和 container-compose 命令。"]
+            )
+        }
+
+        if let globalResult = mapDockerGlobalCommand(tokens, notes: notes) {
+            return globalResult
+        }
+
+        let stripped = stripDockerGlobalOptions(tokens)
+        notes.append(contentsOf: stripped.notes)
+        tokens = stripped.arguments
+
+        if let globalResult = mapDockerGlobalCommand(tokens, notes: notes) {
+            return globalResult
+        }
+
+        guard !tokens.isEmpty else {
+            return .init(status: .unsupported, commands: [], notes: notes + ["缺少 docker 子命令。"])
+        }
+
+        if tokens.first == "compose" {
+            tokens.removeFirst()
+            return .init(
+                status: .warning,
+                commands: [.init(executable: "container-compose", arguments: tokens)],
+                notes: notes + ["Docker Compose 已转换为 container-compose；请确认本机已安装 container-compose。"]
+            )
+        }
+
+        return mapDockerSubcommand(tokens, notes: notes)
+    }
+
+    private static func mapDockerGlobalCommand(
+        _ tokens: [String],
+        notes: [String]
+    ) -> DockerCommandConversionResult? {
+        guard let first = tokens.first else { return nil }
+        switch first {
+        case "--version", "-v":
+            return .init(
+                status: notes.isEmpty ? .converted : .warning,
+                commands: [.init(executable: "container", arguments: ["--version"])],
+                notes: notes
+            )
+        case "--help", "-h":
+            return .init(
+                status: notes.isEmpty ? .converted : .warning,
+                commands: [.init(executable: "container", arguments: ["--help"])],
+                notes: notes
+            )
+        default:
+            return nil
+        }
+    }
+
     private static func mapDockerSubcommand(_ tokens: [String], notes: [String]) -> DockerCommandConversionResult {
         var tokens = tokens
         let subcommand = tokens.removeFirst()
         var notes = notes + riskNotes(for: tokens)
 
         switch subcommand {
+        case "version":
+            return command(["system", "version"] + mapFormatArgument(tokens, notes: &notes), notes: notes)
+        case "info":
+            return command(["system", "status"] + mapFormatArgument(tokens, notes: &notes), notes: notes)
         case "ps":
             return command(["list"] + mapListArguments(tokens, notes: &notes), notes: notes)
         case "images":
@@ -317,13 +360,25 @@ enum DockerCommandConverter {
             return command(["image", "push"] + tokens, notes: notes)
         case "tag":
             return command(["image", "tag"] + tokens, notes: notes)
+        case "save":
+            return command(["image", "save"] + tokens, notes: notes)
+        case "load":
+            return command(["image", "load"] + tokens, notes: notes)
         case "rmi":
             return command(["image", "delete"] + dropDockerRemoveFlags(tokens, notes: &notes), notes: notes)
         case "build":
-            notes.append("Docker BuildKit 专属参数可能需要手动核对。")
+            notes.append(contentsOf: buildNotes(for: tokens))
             return command(["build"] + tokens, notes: notes)
+        case "buildx":
+            guard tokens.first == "build" else {
+                return .init(status: .unsupported, commands: [], notes: notes + ["暂不支持 docker buildx \(tokens.first ?? "")。"])
+            }
+            notes.append("已将 docker buildx build 转换为 container build；Buildx 专属参数可能需要手动核对。")
+            return command(["build"] + Array(tokens.dropFirst()), notes: notes)
         case "run", "create", "start", "stop", "restart", "kill", "exec", "stats":
             return command([subcommand] + tokens, notes: notes)
+        case "export":
+            return command(["export"] + tokens, notes: notes)
         case "rm":
             return command(["delete"] + dropDockerRemoveFlags(tokens, notes: &notes), notes: notes)
         case "logs":
@@ -437,6 +492,9 @@ enum DockerCommandConverter {
             switch argument {
             case "-a":
                 output.append("--all")
+            case "--no-trunc", "--size", "-s":
+                notes.append("container list 不支持 Docker 的 \(argument) 输出选项，已保留并由 CLI 校验。")
+                output.append(argument)
             case "--format":
                 if index + 1 < arguments.count {
                     let value = arguments[index + 1]
@@ -456,6 +514,32 @@ enum DockerCommandConverter {
         return output
     }
 
+    private static func mapFormatArgument(_ arguments: [String], notes: inout [String]) -> [String] {
+        var output: [String] = []
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--format", index + 1 < arguments.count {
+                let value = arguments[index + 1]
+                if value != "json" && value != "table" && value != "yaml" && value != "toml" {
+                    notes.append("Docker Go template --format 与 container 格式枚举不兼容，请核对。")
+                }
+                output.append(contentsOf: ["--format", value])
+                index += 1
+            } else if argument.hasPrefix("--format=") {
+                let value = String(argument.dropFirst("--format=".count))
+                if value != "json" && value != "table" && value != "yaml" && value != "toml" {
+                    notes.append("Docker Go template --format 与 container 格式枚举不兼容，请核对。")
+                }
+                output.append(argument)
+            } else {
+                output.append(argument)
+            }
+            index += 1
+        }
+        return output
+    }
+
     private static func mapLogArguments(_ arguments: [String], notes: inout [String]) -> [String] {
         var output: [String] = []
         var index = 0
@@ -464,12 +548,21 @@ enum DockerCommandConverter {
             if argument == "-f" {
                 output.append("--follow")
             } else if argument == "--tail", index + 1 < arguments.count {
-                output.append(contentsOf: ["-n", arguments[index + 1]])
+                let value = arguments[index + 1]
+                if value != "all" {
+                    output.append(contentsOf: ["-n", value])
+                }
                 index += 1
             } else if argument.hasPrefix("--tail=") {
-                output.append(contentsOf: ["-n", String(argument.dropFirst("--tail=".count))])
+                let value = String(argument.dropFirst("--tail=".count))
+                if value != "all" {
+                    output.append(contentsOf: ["-n", value])
+                }
             } else if argument == "--timestamps" || argument == "-t" {
                 notes.append("container logs 没有完全等价的 Docker 时间戳格式，已保留/请核对。")
+                output.append(argument)
+            } else if argument == "--since" || argument == "--until" || argument == "--details" {
+                notes.append("container logs 暂不支持 Docker 的 \(argument) 过滤选项，已保留并由 CLI 校验。")
                 output.append(argument)
             } else {
                 output.append(argument)
@@ -499,11 +592,27 @@ enum DockerCommandConverter {
             if first == "-D" || first == "--debug" {
                 output.removeFirst()
                 notes.append("已忽略 Docker 全局调试参数 \(first)。")
-            } else if first == "--context" || first == "--host" || first == "-H" || first == "--config" || first == "--log-level" {
+            } else if first == "--tls" || first == "--tlsverify" {
+                output.removeFirst()
+                notes.append("已忽略 Docker TLS 全局参数 \(first)，container CLI 不连接 Docker daemon。")
+            } else if first == "--context"
+                || first == "--host"
+                || first == "-H"
+                || first == "--config"
+                || first == "--log-level"
+                || first == "--tlscacert"
+                || first == "--tlscert"
+                || first == "--tlskey" {
                 let option = output.removeFirst()
                 if !output.isEmpty { output.removeFirst() }
                 notes.append("已忽略 Docker 全局参数 \(option)，container CLI 不使用 Docker daemon context。")
-            } else if first.hasPrefix("--context=") || first.hasPrefix("--host=") || first.hasPrefix("--config=") || first.hasPrefix("--log-level=") {
+            } else if first.hasPrefix("--context=")
+                || first.hasPrefix("--host=")
+                || first.hasPrefix("--config=")
+                || first.hasPrefix("--log-level=")
+                || first.hasPrefix("--tlscacert=")
+                || first.hasPrefix("--tlscert=")
+                || first.hasPrefix("--tlskey=") {
                 output.removeFirst()
                 notes.append("已忽略 Docker daemon 相关全局参数 \(first)。")
             } else {
@@ -512,6 +621,28 @@ enum DockerCommandConverter {
         }
 
         return (output, notes)
+    }
+
+    private static func buildNotes(for arguments: [String]) -> [String] {
+        let unsupportedBuildFlags = [
+            "--add-host",
+            "--allow",
+            "--attest",
+            "--cache-from",
+            "--cache-to",
+            "--iidfile",
+            "--load",
+            "--metadata-file",
+            "--network",
+            "--push",
+            "--ssh",
+        ]
+
+        return unsupportedBuildFlags.compactMap { flag in
+            arguments.contains { argument in
+                argument == flag || argument.hasPrefix("\(flag)=")
+            } ? "Docker BuildKit 参数 \(flag) 在 container build 中可能没有直接等价项，请核对。" : nil
+        }
     }
 
     private static func riskNotes(for arguments: [String]) -> [String] {

@@ -98,6 +98,13 @@ struct AppTopBar: View {
             }
 
             TopBarButton(
+                systemImage: "terminal",
+                help: DockerCompatibilityTerminalStrings.openTerminalHelp(language)
+            ) {
+                ContainerDesktopWindowRouter.openDockerCompatibilityTerminal()
+            }
+
+            TopBarButton(
                 systemImage: "arrow.clockwise",
                 isLoading: runtimeStore.isRefreshing,
                 help: language.t(.refresh)
