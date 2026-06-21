@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var statusPopover: NSPopover?
     private var statusPopoverEventMonitor: Any?
     private var userDefaultsObserver: NSObjectProtocol?
+    private var composeProjectAutoRegistrationObserver: NSObjectProtocol?
     private var lastChromePreferences: AppChromePreferences?
 
     private var appearance: AppearancePreference {
@@ -59,6 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let rawValue = UserDefaults.containerDesktopShared.string(forKey: "containerdesktop.language")
             ?? AppLanguage.system.rawValue
         return AppLanguage(rawValue: rawValue) ?? .system
+    }
+
+    private var dockerCompatibilityTerminalStyle: DockerCompatibilityTerminalStyle {
+        DockerCompatibilityTerminalStyle.stored()
     }
 
     private var selectedSection: AppSection {
@@ -83,12 +88,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             openDockerCompatibilityTerminal: { [weak self] in
                 self?.openDockerCompatibilityTerminalAppOrWindow()
             },
+            openDockerCompatibilityTerminalRequest: { [weak self] request in
+                self?.openDockerCompatibilityTerminalAppOrWindow(
+                    request: request,
+                    addTabIfWindowExists: true
+                )
+            },
             openDockerCompatibilityTerminalStyleSettings: { [weak self] in
                 self?.openDockerCompatibilityTerminalStyleSettingsWindow()
             }
         )
         lastChromePreferences = currentChromePreferences
         observeUserDefaults()
+        observeComposeProjectAutoRegistrationRequests()
         configureStatusItem()
         openMainWindow()
         loadInitialData()
@@ -112,6 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applicationWillTerminate(_ notification: Notification) {
         if let userDefaultsObserver {
             NotificationCenter.default.removeObserver(userDefaultsObserver)
+        }
+        if let composeProjectAutoRegistrationObserver {
+            DistributedNotificationCenter.default().removeObserver(composeProjectAutoRegistrationObserver)
         }
         statsHistoryStore.shutdown()
         dockerCompatibilityTerminalTabsStore?.stopAll()
@@ -178,11 +193,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         workingDirectory: URL = AppPaths.homeDirectory,
         addTabIfWindowExists: Bool = false
     ) {
-        if DockerCompatibilityTerminalEmbeddedApp.open(workingDirectory: workingDirectory) {
+        openDockerCompatibilityTerminalAppOrWindow(
+            request: DockerCompatibilityTerminalOpenRequest(workingDirectory: workingDirectory),
+            addTabIfWindowExists: addTabIfWindowExists
+        )
+    }
+
+    private func openDockerCompatibilityTerminalAppOrWindow(
+        request: DockerCompatibilityTerminalOpenRequest,
+        addTabIfWindowExists: Bool = false
+    ) {
+        if DockerCompatibilityTerminalEmbeddedApp.open(request: request) {
             return
         }
         openDockerCompatibilityTerminalWindow(
-            workingDirectory: workingDirectory,
+            request: request,
             addTabIfWindowExists: addTabIfWindowExists
         )
     }
@@ -191,13 +216,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         workingDirectory: URL = AppPaths.homeDirectory,
         addTabIfWindowExists: Bool = false
     ) {
+        openDockerCompatibilityTerminalWindow(
+            request: DockerCompatibilityTerminalOpenRequest(workingDirectory: workingDirectory),
+            addTabIfWindowExists: addTabIfWindowExists
+        )
+    }
+
+    private func openDockerCompatibilityTerminalWindow(
+        request: DockerCompatibilityTerminalOpenRequest,
+        addTabIfWindowExists: Bool = false
+    ) {
         if let dockerCompatibilityTerminalWindow {
             if let tabsStore = dockerCompatibilityTerminalTabsStore {
-                if addTabIfWindowExists || tabsStore.tabs.isEmpty {
-                    tabsStore.newTab(workingDirectory: workingDirectory)
+                if addTabIfWindowExists || request.shellTarget != nil || tabsStore.tabs.isEmpty {
+                    tabsStore.newTab(request: request)
                 }
             } else {
-                let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: workingDirectory)
+                let tabsStore = DockerCompatibilityTerminalTabsStore(initialRequest: request)
                 dockerCompatibilityTerminalTabsStore = tabsStore
                 dockerCompatibilityTerminalHostingController?.rootView = dockerCompatibilityTerminalRootView(tabsStore: tabsStore)
             }
@@ -208,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
 
-        let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: workingDirectory)
+        let tabsStore = DockerCompatibilityTerminalTabsStore(initialRequest: request)
         dockerCompatibilityTerminalTabsStore = tabsStore
         let hostingController = NSHostingController(rootView: dockerCompatibilityTerminalRootView(tabsStore: tabsStore))
         hostingController.sizingOptions = []
@@ -225,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         dockerCompatibilityTerminalWindow = window
         dockerCompatibilityTerminalHostingController = hostingController
         configureDockerCompatibilityTerminalTabKeyCommands(on: window)
-        applyAppearance(to: window)
+        applyDockerCompatibilityTerminalWindowChrome(window)
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -297,8 +332,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
     }
 
+    private func observeComposeProjectAutoRegistrationRequests() {
+        composeProjectAutoRegistrationObserver = DistributedNotificationCenter.default().addObserver(
+            forName: ComposeProjectAutoRegistrationNotification.name,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let request = ComposeProjectAutoRegistrationNotification.request(from: notification.userInfo)
+            Task { @MainActor [weak self, request] in
+                guard let request else { return }
+                await self?.composeStore.registerExternalProject(fileURL: request.composeFileURL)
+            }
+        }
+    }
+
     private var currentChromePreferences: AppChromePreferences {
-        AppChromePreferences(language: language, appearance: appearance)
+        AppChromePreferences(language: language, appearance: appearance, terminalStyle: dockerCompatibilityTerminalStyle)
     }
 
     private func refreshAppChromeIfNeeded() {
@@ -373,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let tabsStore = dockerCompatibilityTerminalTabsStore {
             dockerCompatibilityTerminalHostingController?.rootView = dockerCompatibilityTerminalRootView(tabsStore: tabsStore)
         }
-        applyAppearance(to: dockerCompatibilityTerminalWindow)
+        applyDockerCompatibilityTerminalWindowChrome(dockerCompatibilityTerminalWindow)
     }
 
     private func refreshDockerCompatibilityTerminalStyleSettingsWindow() {
@@ -458,13 +507,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 tabsStore: tabsStore,
                 onOpenStyleSettings: {
                     ContainerDesktopWindowRouter.openDockerCompatibilityTerminalStyleSettings()
-                },
-                onCloseWindow: { [weak self] in
-                    self?.dockerCompatibilityTerminalWindow?.performClose(nil)
                 }
             )
                 .environment(\.appLanguage, language)
-                .preferredColorScheme(appearance.colorScheme)
+                .preferredColorScheme(DockerCompatibilityTerminalWindowChrome.palette(for: dockerCompatibilityTerminalStyle).preferredColorScheme)
         )
     }
 
@@ -497,6 +543,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         window.onSelectPreviousTab = { [weak self] in
             self?.dockerCompatibilityTerminalTabsStore?.selectPreviousTab()
         }
+        window.onSendInterrupt = { [weak self] in
+            self?.dockerCompatibilityTerminalTabsStore?.selectedTab?.store.sendTerminalInputData(
+                Data([TerminalControlKeyMapper.interruptByte])
+            )
+        }
     }
 
     private func newDockerCompatibilityTerminalTab() {
@@ -509,12 +560,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func closeSelectedDockerCompatibilityTerminalTab() {
         guard let tabsStore = dockerCompatibilityTerminalTabsStore else {
-            dockerCompatibilityTerminalWindow?.performClose(nil)
+            openDockerCompatibilityTerminalWindow()
             return
         }
-        if tabsStore.closeSelectedTab() == .closedLastTab {
-            dockerCompatibilityTerminalWindow?.performClose(nil)
-        }
+        tabsStore.closeSelectedTab()
     }
 
     private func applyAppearance(to window: NSWindow?) {
@@ -538,6 +587,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         window.toolbarStyle = .unifiedCompact
         window.titlebarSeparatorStyle = .none
         window.toolbar = nil
+    }
+
+    private func applyDockerCompatibilityTerminalWindowChrome(_ window: NSWindow?) {
+        DockerCompatibilityTerminalWindowChrome.apply(
+            to: window,
+            title: dockerCompatibilityTerminalWindowTitle,
+            style: dockerCompatibilityTerminalStyle
+        )
     }
 
     @objc private func toggleStatusPopover(_ sender: NSStatusBarButton) {
@@ -594,6 +651,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         dockerCompatibilityTerminalWindow = nil
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === dockerCompatibilityTerminalWindow else { return true }
+        sender.orderOut(nil)
+        return false
+    }
+
     @objc func openDockerCompatibilityTerminal(
         _ pasteboard: NSPasteboard,
         userData: String,
@@ -613,4 +676,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 private struct AppChromePreferences: Equatable {
     var language: AppLanguage
     var appearance: AppearancePreference
+    var terminalStyle: DockerCompatibilityTerminalStyle
 }

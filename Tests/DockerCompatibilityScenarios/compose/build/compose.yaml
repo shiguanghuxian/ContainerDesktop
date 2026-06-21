@@ -1,0 +1,9 @@
+services:
+  web:
+    build:
+      context: ../../image-build
+      dockerfile: Dockerfile
+      args:
+        VERSION: compose-build
+    image: local/containerdesktop-compose-build:latest
+    command: ["sh", "-c", "cat /version.txt && sleep 3600"]

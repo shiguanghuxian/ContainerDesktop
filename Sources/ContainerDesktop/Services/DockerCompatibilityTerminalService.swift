@@ -25,6 +25,16 @@ struct DockerCompatibilityTerminalService: Sendable {
         verboseConversions: Bool = false,
         workingDirectory: URL = AppPaths.homeDirectory
     ) throws -> (session: ContainerTerminalSession, environment: DockerCompatibilityTerminalEnvironment) {
+        try makeSession(
+            verboseConversions: verboseConversions,
+            request: DockerCompatibilityTerminalOpenRequest(workingDirectory: workingDirectory)
+        )
+    }
+
+    func makeSession(
+        verboseConversions: Bool = false,
+        request: DockerCompatibilityTerminalOpenRequest
+    ) throws -> (session: ContainerTerminalSession, environment: DockerCompatibilityTerminalEnvironment) {
         let environment = try prepareEnvironment()
         let basePath = ProcessInfo.processInfo.environment["PATH"] ?? CommandRunner.defaultSearchRoots().map(\.path).joined(separator: ":")
         let path = "\(environment.shimBinDirectory.path):\(basePath)"
@@ -36,12 +46,22 @@ struct DockerCompatibilityTerminalService: Sendable {
             "TERM": ProcessInfo.processInfo.environment["TERM"] ?? "xterm-256color",
         ]
 
-        let session = ContainerTerminalSession(
-            executable: environment.shellPath,
-            arguments: ["-i"],
-            workingDirectory: workingDirectory,
-            environmentOverrides: overrides
-        )
+        let session: ContainerTerminalSession
+        if let shellTarget = request.shellTarget {
+            session = ContainerTerminalSession(
+                executable: "/usr/bin/env",
+                arguments: shellTarget.containerCLIArguments,
+                workingDirectory: request.workingDirectory,
+                environmentOverrides: overrides
+            )
+        } else {
+            session = ContainerTerminalSession(
+                executable: environment.shellPath,
+                arguments: ["-i"],
+                workingDirectory: request.workingDirectory,
+                environmentOverrides: overrides
+            )
+        }
         return (session, environment)
     }
 

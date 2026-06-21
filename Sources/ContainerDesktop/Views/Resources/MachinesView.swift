@@ -201,39 +201,36 @@ struct MachinesView: View {
                                         .font(.callout.weight(.medium))
                                         .lineLimit(1)
                                         .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
-
-                                    Text(machine.ipAddressText)
-                                        .font(.callout.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.82)
-                                        .frame(width: 116, alignment: .leading)
-
-                                    Text("\(machine.cpus)")
-                                        .font(.callout.monospacedDigit())
-                                        .frame(width: 48, alignment: .trailing)
-
-                                    Text(machine.memoryDisplay)
-                                        .font(.callout.monospacedDigit())
-                                        .frame(width: 88, alignment: .trailing)
-
-                                    Text(machine.diskSizeDisplay)
-                                        .font(.callout.monospacedDigit())
-                                        .frame(width: 86, alignment: .trailing)
-
-                                    Text(machine.statusText)
-                                        .lineLimit(1)
-                                        .frame(width: 76, alignment: .leading)
-
-                                    Image(systemName: machine.isDefault ? "star.fill" : "star")
-                                        .foregroundStyle(machine.isDefault ? .yellow : .secondary)
-                                        .frame(width: 42)
-                                        .help(language.t(.defaultMachine))
                                 }
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                             .help(language.resolved == .zhHans ? "打开 Machine 详情" : "Open Machine details")
+
+                            CopyableIPAddressText(value: machine.ipAddressText)
+                                .frame(width: 116, alignment: .leading)
+
+                            Text("\(machine.cpus)")
+                                .font(.callout.monospacedDigit())
+                                .frame(width: 48, alignment: .trailing)
+
+                            Text(machine.memoryDisplay)
+                                .font(.callout.monospacedDigit())
+                                .frame(width: 88, alignment: .trailing)
+
+                            Text(machine.diskSizeDisplay)
+                                .font(.callout.monospacedDigit())
+                                .frame(width: 86, alignment: .trailing)
+
+                            Text(machine.statusText)
+                                .lineLimit(1)
+                                .frame(width: 76, alignment: .leading)
+
+                            Image(systemName: machine.isDefault ? "star.fill" : "star")
+                                .foregroundStyle(machine.isDefault ? .yellow : .secondary)
+                                .frame(width: 42)
+                                .help(language.t(.defaultMachine))
 
                             HStack(spacing: 8) {
                                 let startStopKey = machine.isRunning
@@ -253,12 +250,15 @@ struct MachinesView: View {
                                         Task { await runtimeStore.bootMachine(machine.id) }
                                     }
                                 }
-                                RowActionButton(
+                                RowActionMenuButton(
                                     systemImage: "terminal",
                                     tint: machine.isRunning ? CDTheme.dockerBlue : .secondary,
+                                    isDisabled: !machine.isRunning,
                                     help: language.resolved == .zhHans ? "打开 Machine 终端" : "Open Machine terminal"
                                 ) {
-                                    openMachineTerminal(machine)
+                                    ExternalTerminalDestinationMenuItems { destination in
+                                        openMachineTerminal(machine, destination: destination)
+                                    }
                                 }
                                 let defaultKey = RuntimeOperationKey.machineSetDefault(machine.id)
                                 RowActionButton(
@@ -313,13 +313,19 @@ struct MachinesView: View {
         drawerMode = .overview
     }
 
-    private func openMachineTerminal(_ machine: MachineSummary) {
+    private func openMachineTerminal(
+        _ machine: MachineSummary,
+        destination: ExternalTerminalDestination
+    ) {
         guard machine.isRunning else {
             runtimeStore.errorMessage = language.resolved == .zhHans ? "Machine 未运行，无法进入终端。" : "The machine is not running."
             return
         }
         do {
-            try SystemTerminalLauncher.openMachineShell(id: machine.id)
+            try ExternalTerminalLauncher.open(
+                destination: destination,
+                target: .machine(id: machine.id)
+            )
         } catch {
             runtimeStore.errorMessage = error.localizedDescription
         }
@@ -575,7 +581,7 @@ private struct MachineDrawerOverview: View {
             DetailSection(title: language.resolved == .zhHans ? "Machine" : "Machine") {
                 DetailInfoCard {
                     DetailInfoRow(title: language.t(.status), value: machine.statusText)
-                    DetailInfoRow(title: "IP", value: machine.ipAddressText, monospaced: true)
+                    CopyableIPAddressInfoRow(title: "IP", value: machine.ipAddressText)
                     DetailInfoRow(title: "CPU", value: "\(machine.cpus)")
                     DetailInfoRow(title: "Memory", value: machine.memoryDisplay)
                     DetailInfoRow(title: "Disk", value: machine.diskSizeDisplay)

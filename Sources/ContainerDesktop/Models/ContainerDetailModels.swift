@@ -35,6 +35,200 @@ enum ContainerDetailTab: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+enum ContainerBrowserPortTargetSource: String, Codable, Hashable, Sendable {
+    case host
+    case container
+}
+
+struct ContainerBrowserPortTarget: Identifiable, Hashable, Sendable {
+    var id: String { url.absoluteString }
+    var title: String
+    var url: URL
+    var source: ContainerBrowserPortTargetSource
+    var scheme: String
+    var protocolName: String
+    var hostPort: Int?
+    var containerPort: Int
+
+    static func targets(from inspectText: String, container: ContainerSummary) -> [ContainerBrowserPortTarget] {
+        guard let data = inspectText.data(using: .utf8),
+              let value = try? JSONDecoder.containerDesktop.decode(JSONValue.self, from: data) else {
+            return []
+        }
+        return targets(from: value, container: container)
+    }
+
+    static func targets(from inspectValue: JSONValue, container: ContainerSummary) -> [ContainerBrowserPortTarget] {
+        let mappings = ContainerPublishedPortMapping.mappings(from: inspectValue)
+        let containerHost = IPAddressCopy.normalized(container.primaryIP)
+        var targets: [ContainerBrowserPortTarget] = []
+
+        for mapping in mappings where mapping.protocolName == "tcp" {
+            if let hostPort = mapping.hostPort,
+               let url = makeURL(host: normalizedHostBindAddress(mapping.hostIP), port: hostPort) {
+                targets.append(ContainerBrowserPortTarget(
+                    title: "Host \(url.host ?? "127.0.0.1"):\(hostPort)",
+                    url: url,
+                    source: .host,
+                    scheme: "http",
+                    protocolName: mapping.protocolName,
+                    hostPort: hostPort,
+                    containerPort: mapping.containerPort
+                ))
+            }
+
+            if let containerHost,
+               let url = makeURL(host: containerHost, port: mapping.containerPort) {
+                targets.append(ContainerBrowserPortTarget(
+                    title: "Container \(containerHost):\(mapping.containerPort)",
+                    url: url,
+                    source: .container,
+                    scheme: "http",
+                    protocolName: mapping.protocolName,
+                    hostPort: mapping.hostPort,
+                    containerPort: mapping.containerPort
+                ))
+            }
+        }
+
+        var seenURLs: Set<String> = []
+        return targets.filter { target in
+            seenURLs.insert(target.url.absoluteString).inserted
+        }
+    }
+
+    static func portSummary(from inspectText: String) -> String {
+        guard let data = inspectText.data(using: .utf8),
+              let value = try? JSONDecoder.containerDesktop.decode(JSONValue.self, from: data) else {
+            return "No ports"
+        }
+        let values = ContainerPublishedPortMapping.mappings(from: value)
+            .map(\.displayText)
+        return values.isEmpty ? "No ports" : values.prefix(3).joined(separator: ", ")
+    }
+
+    private static func makeURL(host: String, port: Int) -> URL? {
+        guard (1...65_535).contains(port) else { return nil }
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = host
+        components.port = port
+        return components.url
+    }
+
+    private static func normalizedHostBindAddress(_ host: String?) -> String {
+        guard let host = IPAddressCopy.normalized(host) else { return "127.0.0.1" }
+        if host == "0.0.0.0" || host == "::" || host == "[::]" {
+            return "127.0.0.1"
+        }
+        return host
+    }
+}
+
+private struct ContainerPublishedPortMapping: Hashable, Sendable {
+    var protocolName: String
+    var hostIP: String?
+    var hostPort: Int?
+    var containerPort: Int
+
+    var displayText: String {
+        if let hostPort {
+            return "\(hostPort):\(containerPort)/\(protocolName)"
+        }
+        return "\(containerPort)/\(protocolName)"
+    }
+
+    static func mappings(from value: JSONValue) -> [ContainerPublishedPortMapping] {
+        guard let object = rootObject(from: value),
+              let configuration = object.value(forAny: ["configuration", "Configuration"]),
+              case .object(let config) = configuration,
+              let publishedPorts = config.value(forAny: ["publishedPorts", "published_ports", "PublishedPorts"]),
+              case .array(let ports) = publishedPorts else {
+            return []
+        }
+
+        return ports.compactMap { port in
+            guard case .object(let item) = port else { return nil }
+            let proto = item.scalarText(forAny: ["protocol", "proto"])?.lowercased() ?? "tcp"
+            guard let containerPort = item.portValue(forAny: ["containerPort", "container_port", "targetPort", "target", "port"]) else {
+                return nil
+            }
+
+            let hostValue = item.scalarText(forAny: ["host"])
+            let hostPort = item.portValue(forAny: ["hostPort", "host_port", "publishedPort", "published"])
+                ?? numericHostPort(from: hostValue)
+            let hostIP = item.scalarText(forAny: ["hostIP", "hostIp", "host_ip", "hostAddress", "host_address", "address", "ip"])
+                ?? nonNumericHost(from: hostValue)
+
+            return ContainerPublishedPortMapping(
+                protocolName: proto,
+                hostIP: hostIP,
+                hostPort: hostPort,
+                containerPort: containerPort
+            )
+        }
+    }
+
+    private static func rootObject(from value: JSONValue) -> [String: JSONValue]? {
+        switch value {
+        case .array(let values):
+            if case .object(let first)? = values.first { return first }
+            return nil
+        case .object(let object):
+            return object
+        default:
+            return nil
+        }
+    }
+
+    private static func numericHostPort(from value: String?) -> Int? {
+        guard let value else { return nil }
+        return Int(value).flatMap { (1...65_535).contains($0) ? $0 : nil }
+    }
+
+    private static func nonNumericHost(from value: String?) -> String? {
+        guard let value, numericHostPort(from: value) == nil else { return nil }
+        return value
+    }
+}
+
+private extension Dictionary where Key == String, Value == JSONValue {
+    func value(forAny keys: [String]) -> JSONValue? {
+        for key in keys {
+            if let value = self[key] { return value }
+        }
+        return nil
+    }
+
+    func scalarText(forAny keys: [String]) -> String? {
+        value(forAny: keys)?.scalarText?.nilIfBlank
+    }
+
+    func portValue(forAny keys: [String]) -> Int? {
+        guard let text = scalarText(forAny: keys),
+              let value = Int(text),
+              (1...65_535).contains(value) else {
+            return nil
+        }
+        return value
+    }
+}
+
+private extension JSONValue {
+    var scalarText: String? {
+        switch self {
+        case .string(let value):
+            value
+        case .number(let value):
+            value.rounded() == value ? String(Int64(value)) : String(value)
+        case .bool(let value):
+            String(value)
+        default:
+            nil
+        }
+    }
+}
+
 enum ContainerFileKind: String, Codable, Hashable, Sendable {
     case directory
     case regularFile

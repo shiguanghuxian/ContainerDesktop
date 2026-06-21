@@ -101,6 +101,57 @@ struct ContainerDetailModelsTests {
         #expect(downsampled.last?.date == samples.last?.date)
     }
 
+    @Test("builds browser targets from published TCP ports")
+    func buildsBrowserTargetsFromPublishedTCPPorts() {
+        let container = Self.makeContainer(ipv4Address: "192.168.64.2")
+        let inspect = """
+        [{
+          "configuration": {
+            "publishedPorts": [
+              { "hostIP": "0.0.0.0", "hostPort": 8080, "containerPort": 80, "protocol": "tcp" },
+              { "host": "::", "hostPort": "8443", "containerPort": "443", "protocol": "tcp" }
+            ]
+          }
+        }]
+        """
+
+        let targets = ContainerBrowserPortTarget.targets(from: inspect, container: container)
+
+        #expect(targets.map(\.url.absoluteString) == [
+            "http://127.0.0.1:8080",
+            "http://192.168.64.2:80",
+            "http://127.0.0.1:8443",
+            "http://192.168.64.2:443",
+        ])
+        #expect(targets.map(\.source) == [.host, .container, .host, .container])
+        #expect(ContainerBrowserPortTarget.portSummary(from: inspect) == "8080:80/tcp, 8443:443/tcp")
+    }
+
+    @Test("filters invalid duplicate and non TCP browser targets")
+    func filtersInvalidDuplicateAndNonTCPBrowserTargets() {
+        let container = Self.makeContainer(ipv4Address: "10.0.0.8")
+        let inspect = """
+        {
+          "configuration": {
+            "publishedPorts": [
+              { "host": "127.0.0.1", "hostPort": 8080, "containerPort": 80, "protocol": "tcp" },
+              { "host": "127.0.0.1", "hostPort": 8080, "containerPort": 80, "protocol": "tcp" },
+              { "hostPort": 5353, "containerPort": 53, "protocol": "udp" },
+              { "hostPort": "bad", "containerPort": "bad", "protocol": "tcp" },
+              { "hostPort": 9000, "containerPort": 70000, "protocol": "tcp" }
+            ]
+          }
+        }
+        """
+
+        let targets = ContainerBrowserPortTarget.targets(from: inspect, container: container)
+
+        #expect(targets.map(\.url.absoluteString) == [
+            "http://127.0.0.1:8080",
+            "http://10.0.0.8:80",
+        ])
+    }
+
     @Test("stops terminal sessions and reports termination")
     func stopsTerminalSession() throws {
         let terminated = LockedValue<Int32?>(nil)
@@ -244,6 +295,24 @@ struct ContainerDetailModelsTests {
             networkRxBytes: networkRxBytes,
             networkTxBytes: networkTxBytes,
             numProcesses: numProcesses
+        )
+    }
+
+    private static func makeContainer(ipv4Address: String) -> ContainerSummary {
+        ContainerSummary(
+            configuration: .init(
+                id: "web",
+                image: .init(reference: "nginx:latest"),
+                platform: .init(os: "linux", architecture: "arm64"),
+                resources: .init(cpus: 1, memoryInBytes: 1_073_741_824),
+                creationDate: nil,
+                labels: [:]
+            ),
+            status: .init(
+                state: "running",
+                networks: [.init(ipv4Address: ipv4Address)],
+                startedDate: nil
+            )
         )
     }
 }

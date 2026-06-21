@@ -5,6 +5,7 @@ struct DashboardView: View {
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var composeStore: ComposeProjectStore
     @Bindable var systemConfigStore: SystemConfigStore
+    var onOpenResourceSnapshot: () -> Void
 
     private let metricColumns = [
         GridItem(.adaptive(minimum: 176), spacing: 12),
@@ -49,6 +50,14 @@ struct DashboardView: View {
                         systemImage: runtimeStore.environment.systemRunning ? "checkmark.circle" : "exclamationmark.triangle",
                         tint: runtimeStore.environment.systemRunning ? .green : .orange
                     )
+                    Button {
+                        onOpenResourceSnapshot()
+                    } label: {
+                        Label(language.resolved == .zhHans ? "资源快照" : "Stats Snapshot", systemImage: "sidebar.right")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(language.resolved == .zhHans ? "在观测页面打开资源快照" : "Open stats snapshot in Observability")
+
                     Button {
                         refreshDashboard()
                     } label: {

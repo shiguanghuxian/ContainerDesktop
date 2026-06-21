@@ -14,6 +14,8 @@ struct AppTopBar: View {
         ZStack(alignment: .bottomLeading) {
             CDTheme.dockerBlue
 
+            WindowDragZoomRegion()
+
             HStack(spacing: 18) {
                 brandCluster
 
@@ -27,9 +29,6 @@ struct AppTopBar: View {
             .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .center)
         }
         .frame(maxWidth: .infinity, minHeight: 52, idealHeight: 52, maxHeight: 52, alignment: .leading)
-        .contentShape(Rectangle())
-        .simultaneousGesture(WindowDragGesture())
-        .allowsWindowActivationEvents(true)
     }
 
     private var brandCluster: some View {

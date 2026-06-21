@@ -17,35 +17,48 @@ final class VolumeBrowserStore {
         self.service = service
     }
 
-    func load(volume: VolumeSummary, relativePath: String = "") {
+    @discardableResult
+    func load(volume: VolumeSummary, relativePath: String = "", resetStatus: Bool = true) async -> Bool {
         isLoading = true
-        isError = false
-        statusMessage = nil
+        if resetStatus {
+            isError = false
+            statusMessage = nil
+        }
         defer { isLoading = false }
 
         do {
-            snapshot = try service.list(sourcePath: volume.source, relativePath: relativePath)
+            snapshot = try await service.list(
+                volumeName: volume.name,
+                sourcePath: volume.source,
+                relativePath: relativePath
+            )
+            return true
         } catch {
             snapshot = nil
             statusMessage = error.localizedDescription
             isError = true
+            return false
         }
     }
 
-    func open(_ entry: VolumeFileEntry) {
+    func open(_ entry: VolumeFileEntry, volume: VolumeSummary) async {
         guard entry.isDirectory, let snapshot else { return }
         let relativePath = entry.url.path
             .replacingOccurrences(of: snapshot.sourceURL.path, with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         do {
-            self.snapshot = try service.list(sourcePath: snapshot.sourceURL.path, relativePath: relativePath)
+            self.snapshot = try await service.list(
+                volumeName: volume.name,
+                sourcePath: volume.source,
+                relativePath: relativePath
+            )
         } catch {
             statusMessage = error.localizedDescription
             isError = true
         }
     }
 
-    func goUp() {
+    func goUp(volume: VolumeSummary) async {
         guard let snapshot else { return }
         let path = snapshot.relativePath
             .split(separator: "/")
@@ -53,7 +66,11 @@ final class VolumeBrowserStore {
             .map(String.init)
             .joined(separator: "/")
         do {
-            self.snapshot = try service.list(sourcePath: snapshot.sourceURL.path, relativePath: path)
+            self.snapshot = try await service.list(
+                volumeName: volume.name,
+                sourcePath: volume.source,
+                relativePath: path
+            )
         } catch {
             statusMessage = error.localizedDescription
             isError = true
@@ -68,9 +85,13 @@ final class VolumeBrowserStore {
         defer { isImportExportRunning = false }
 
         do {
-            let output = try await service.exportVolume(sourcePath: volume.source, outputPath: outputPath)
+            let output = try await service.exportVolume(
+                volumeName: volume.name,
+                sourcePath: volume.source,
+                outputPath: outputPath
+            )
             statusMessage = output.nilIfBlank ?? "卷已导出到 \(outputPath)。"
-            load(volume: volume, relativePath: snapshot?.relativePath ?? "")
+            await load(volume: volume, relativePath: snapshot?.relativePath ?? "")
         } catch {
             statusMessage = error.localizedDescription
             isError = true
@@ -85,9 +106,13 @@ final class VolumeBrowserStore {
         defer { isImportExportRunning = false }
 
         do {
-            let output = try await service.importArchive(sourcePath: volume.source, archivePath: archivePath)
+            let output = try await service.importArchive(
+                volumeName: volume.name,
+                sourcePath: volume.source,
+                archivePath: archivePath
+            )
             statusMessage = output.nilIfBlank ?? "归档已导入到卷 \(volume.name)。"
-            load(volume: volume, relativePath: snapshot?.relativePath ?? "")
+            await load(volume: volume, relativePath: snapshot?.relativePath ?? "")
         } catch {
             statusMessage = error.localizedDescription
             isError = true
@@ -103,12 +128,25 @@ final class VolumeBrowserStore {
         defer { isFileOperationRunning = false }
 
         do {
-            statusMessage = try await service.createDirectory(
+            let output = try await service.createDirectory(
+                volumeName: volume.name,
                 sourcePath: volume.source,
                 relativePath: relativePath,
                 name: name
             )
-            load(volume: volume, relativePath: relativePath)
+            statusMessage = output
+            do {
+                isLoading = true
+                defer { isLoading = false }
+                snapshot = try await service.list(
+                    volumeName: volume.name,
+                    sourcePath: volume.source,
+                    relativePath: relativePath
+                )
+            } catch {
+                statusMessage = "\(output)\n创建成功，但刷新目录失败：\(error.localizedDescription)"
+                isError = true
+            }
         } catch {
             statusMessage = error.localizedDescription
             isError = true
@@ -125,11 +163,12 @@ final class VolumeBrowserStore {
 
         do {
             statusMessage = try await service.renameEntry(
+                volumeName: volume.name,
                 sourcePath: volume.source,
                 entryPath: entry.url.path,
                 newName: newName
             )
-            load(volume: volume, relativePath: relativePath)
+            await load(volume: volume, relativePath: relativePath)
         } catch {
             statusMessage = error.localizedDescription
             isError = true
@@ -146,10 +185,11 @@ final class VolumeBrowserStore {
 
         do {
             statusMessage = try await service.deleteEntry(
+                volumeName: volume.name,
                 sourcePath: volume.source,
                 entryPath: entry.url.path
             )
-            load(volume: volume, relativePath: relativePath)
+            await load(volume: volume, relativePath: relativePath)
         } catch {
             statusMessage = error.localizedDescription
             isError = true

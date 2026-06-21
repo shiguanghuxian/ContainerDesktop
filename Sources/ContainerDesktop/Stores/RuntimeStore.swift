@@ -91,6 +91,9 @@ final class RuntimeStore {
     var componentVersionErrorMessage: String?
     var componentVersionsLastCheckedAt: Date?
     var activeOperationKey: String?
+    var containerBrowserPortTargets: [String: [ContainerBrowserPortTarget]] = [:]
+    var loadingContainerBrowserPortTargetIDs: Set<String> = []
+    var containerBrowserPortTargetErrors: [String: String] = [:]
     var lastUpdated: Date?
     var hasBootstrapped = false
     @ObservationIgnored private var latestComponentVersionCheck: ComponentLatestVersionCheck?
@@ -135,6 +138,18 @@ final class RuntimeStore {
 
     func isOperationActive(_ key: String) -> Bool {
         activeOperationKey == key
+    }
+
+    func browserPortTargets(for container: ContainerSummary) -> [ContainerBrowserPortTarget] {
+        containerBrowserPortTargets[container.id] ?? []
+    }
+
+    func isLoadingBrowserPortTargets(for container: ContainerSummary) -> Bool {
+        loadingContainerBrowserPortTargetIDs.contains(container.id)
+    }
+
+    func browserPortTargetError(for container: ContainerSummary) -> String? {
+        containerBrowserPortTargetErrors[container.id]
     }
 
     var onboardingIssues: [String] {
@@ -185,6 +200,7 @@ final class RuntimeStore {
     }
 
     func refreshAll() async {
+        clearContainerBrowserPortTargetCache()
         isRefreshing = true
         errorMessage = nil
         defer {
@@ -746,7 +762,9 @@ final class RuntimeStore {
                 throw VolumeBrowserError.invalidDestination
             }
             let output = try await VolumeBrowserService().cloneVolume(
+                sourceVolumeName: source.name,
                 sourcePath: source.source,
+                destinationVolumeName: target.name,
                 destinationPath: target.source
             )
             volumeStatusMessage = output.nilIfBlank ?? "已克隆卷 \(source.name) 到 \(targetName)。"
@@ -775,11 +793,66 @@ final class RuntimeStore {
         }
 
         do {
-            let output = try await VolumeBrowserService().emptyVolume(sourcePath: volume.source)
+            let output = try await VolumeBrowserService().emptyVolume(volumeName: volume.name, sourcePath: volume.source)
             volumeStatusMessage = output.nilIfBlank ?? "已清空卷 \(volume.name)。"
             await refreshAll()
         } catch {
             volumeStatusMessage = "清空卷失败：\(error.localizedDescription)"
+            volumeStatusIsError = true
+            errorMessage = error.localizedDescription
+            await refreshAll()
+        }
+    }
+
+    func createDemoVolumes() async {
+        guard !isVolumeOperationRunning else { return }
+        isVolumeOperationRunning = true
+        busyMessage = "创建示例存储卷"
+        errorMessage = nil
+        volumeStatusMessage = nil
+        volumeStatusIsError = false
+        defer {
+            isVolumeOperationRunning = false
+            busyMessage = nil
+        }
+
+        do {
+            let existing = try await client.listVolumes()
+            let existingNames = Set(existing.map(\.name))
+            let demoVolumes = [
+                VolumeCreateOptions(
+                    name: "cd-demo-empty",
+                    size: nil,
+                    labels: ["purpose=ui-test", "demo=container-desktop"]
+                ),
+                VolumeCreateOptions(
+                    name: "cd-demo-files",
+                    size: "64M",
+                    labels: ["purpose=ui-test", "demo=container-desktop", "content=files"]
+                ),
+                VolumeCreateOptions(
+                    name: "cd-demo-cache",
+                    size: "128M",
+                    labels: ["purpose=ui-test", "demo=container-desktop", "role=cache"]
+                ),
+            ]
+
+            for options in demoVolumes where !existingNames.contains(options.name) {
+                try await client.createVolume(options)
+            }
+
+            let latestVolumes = try await client.listVolumes()
+            guard let filesVolume = latestVolumes.first(where: { $0.name == "cd-demo-files" }) else {
+                throw VolumeBrowserError.invalidDestination
+            }
+            _ = try await VolumeBrowserService().writeDemoFiles(
+                volumeName: filesVolume.name,
+                sourcePath: filesVolume.source
+            )
+            volumeStatusMessage = "已创建 cd-demo-* 示例卷，并写入 cd-demo-files 文件树。"
+            await refreshAll()
+        } catch {
+            volumeStatusMessage = "创建示例卷失败：\(error.localizedDescription)"
             volumeStatusIsError = true
             errorMessage = error.localizedDescription
             await refreshAll()
@@ -807,15 +880,16 @@ final class RuntimeStore {
     }
 
     func createNetwork(name: String, subnet: String?, subnetV6: String?, internalOnly: Bool) async {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        await createNetwork(options: NetworkCreateOptions(name: name, internalOnly: internalOnly, subnet: subnet, subnetV6: subnetV6))
+    }
+
+    func createNetwork(options: NetworkCreateOptions) async {
+        let trimmed = options.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        var resolved = options
+        resolved.name = trimmed
         await perform("创建网络 \(trimmed)", operationKey: RuntimeOperationKey.networkCreate) {
-            try await client.createNetwork(
-                name: trimmed,
-                internalOnly: internalOnly,
-                subnet: subnet?.nilIfBlank,
-                subnetV6: subnetV6?.nilIfBlank
-            )
+            try await client.createNetwork(resolved)
         }
     }
 
@@ -909,6 +983,50 @@ final class RuntimeStore {
 
     func loadNetworkInspect(name: String) async throws -> String {
         try await client.inspectNetwork(name).prettyString
+    }
+
+    func loadVolumeInspect(name: String) async throws -> String {
+        try await client.inspectVolume(name).prettyString
+    }
+
+    func loadBrowserPortTargets(for container: ContainerSummary) async {
+        guard container.state == "running" else {
+            clearContainerBrowserPortTargets(for: container.id)
+            return
+        }
+        guard containerBrowserPortTargets[container.id] == nil,
+              !loadingContainerBrowserPortTargetIDs.contains(container.id),
+              containerBrowserPortTargetErrors[container.id] == nil else {
+            return
+        }
+
+        loadingContainerBrowserPortTargetIDs.insert(container.id)
+        defer {
+            loadingContainerBrowserPortTargetIDs.remove(container.id)
+        }
+
+        do {
+            let inspect = try await client.inspectContainer(container.id)
+            containerBrowserPortTargets[container.id] = ContainerBrowserPortTarget.targets(
+                from: inspect,
+                container: container
+            )
+            containerBrowserPortTargetErrors[container.id] = nil
+        } catch {
+            containerBrowserPortTargetErrors[container.id] = error.localizedDescription
+        }
+    }
+
+    func clearContainerBrowserPortTargets(for containerID: String) {
+        containerBrowserPortTargets.removeValue(forKey: containerID)
+        loadingContainerBrowserPortTargetIDs.remove(containerID)
+        containerBrowserPortTargetErrors.removeValue(forKey: containerID)
+    }
+
+    func clearContainerBrowserPortTargetCache() {
+        containerBrowserPortTargets.removeAll()
+        loadingContainerBrowserPortTargetIDs.removeAll()
+        containerBrowserPortTargetErrors.removeAll()
     }
 
     func loadContainerLogs(_ id: String, boot: Bool = false) async {

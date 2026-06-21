@@ -13,37 +13,27 @@ enum SystemTerminalLauncher {
     }
 
     static func openContainerShell(id: String) throws {
-        try openCommandScript(
-            fileName: "container-\(safeFileComponent(id))-exec.command",
-            body: """
-            #!/bin/zsh
-            clear
-            printf '%s\\n\\n' \(ShellEscaper.singleQuoted("\(AppBranding.displayName) - Container \(id)"))
-            if ! command -v container >/dev/null 2>&1; then
-              echo "container CLI was not found in this terminal session."
-              echo "Press Return to close."
-              read
-              exit 127
-            fi
-            exec container exec -it \(ShellEscaper.singleQuoted(id)) sh
-            """
-        )
+        try openShell(target: .container(id: id))
     }
 
     static func openMachineShell(id: String) throws {
+        try openShell(target: .machine(id: id))
+    }
+
+    static func openShell(target: TerminalShellTarget) throws {
         try openCommandScript(
-            fileName: "machine-\(safeFileComponent(id))-shell.command",
+            fileName: target.systemTerminalScriptFileName,
             body: """
             #!/bin/zsh
             clear
-            printf '%s\\n\\n' \(ShellEscaper.singleQuoted("\(AppBranding.displayName) - Machine \(id)"))
+            printf '%s\\n\\n' \(ShellEscaper.singleQuoted(target.systemTerminalWindowTitle))
             if ! command -v container >/dev/null 2>&1; then
               echo "container CLI was not found in this terminal session."
               echo "Press Return to close."
               read
               exit 127
             fi
-            exec container machine run -n \(ShellEscaper.singleQuoted(id)) -i -t -- sh
+            exec \(target.containerCLIArguments.map(ShellEscaper.singleQuoted).joined(separator: " "))
             """
         )
     }
@@ -148,14 +138,5 @@ enum SystemTerminalLauncher {
         try body.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         NSWorkspace.shared.open(scriptURL)
-    }
-
-    private static func safeFileComponent(_ value: String) -> String {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-        let scalars = value.unicodeScalars.map { scalar in
-            allowed.contains(scalar) ? Character(scalar) : "-"
-        }
-        let result = String(scalars).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return result.isEmpty ? "resource" : result
     }
 }

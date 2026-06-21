@@ -357,7 +357,7 @@ enum DockerCommandConverter {
         case "pull":
             return command(["image", "pull"] + tokens, notes: notes)
         case "push":
-            return command(["image", "push"] + tokens, notes: notes)
+            return mapImagePushCommand(tokens, notes: notes)
         case "tag":
             return command(["image", "tag"] + tokens, notes: notes)
         case "save":
@@ -368,14 +368,18 @@ enum DockerCommandConverter {
             return command(["image", "delete"] + dropDockerRemoveFlags(tokens, notes: &notes), notes: notes)
         case "build":
             notes.append(contentsOf: buildNotes(for: tokens))
-            return command(["build"] + tokens, notes: notes)
+            return command(["build"] + mapBuildArguments(tokens, notes: &notes), notes: notes)
         case "buildx":
             guard tokens.first == "build" else {
                 return .init(status: .unsupported, commands: [], notes: notes + ["暂不支持 docker buildx \(tokens.first ?? "")。"])
             }
             notes.append("已将 docker buildx build 转换为 container build；Buildx 专属参数可能需要手动核对。")
-            return command(["build"] + Array(tokens.dropFirst()), notes: notes)
-        case "run", "create", "start", "stop", "restart", "kill", "exec", "stats":
+            let buildArguments = Array(tokens.dropFirst())
+            notes.append(contentsOf: buildNotes(for: buildArguments))
+            return command(["build"] + mapBuildArguments(buildArguments, notes: &notes), notes: notes)
+        case "run", "create":
+            return command([subcommand] + mapRunArguments(tokens, notes: &notes), notes: notes)
+        case "start", "stop", "restart", "kill", "exec", "stats":
             return command([subcommand] + tokens, notes: notes)
         case "export":
             return command(["export"] + tokens, notes: notes)
@@ -402,6 +406,12 @@ enum DockerCommandConverter {
             return mapNestedCommand(tokens, namespace: "volume", notes: notes)
         case "system":
             return mapSystemCommand(tokens, notes: notes)
+        case "swarm", "service", "stack":
+            return .init(
+                status: .unsupported,
+                commands: [],
+                notes: notes + ["Docker \(subcommand) 依赖 Docker Swarm/daemon 编排能力，apple/container 没有等价子命令；请改用 Compose 或手动迁移部署流程。"]
+            )
         default:
             return .init(
                 status: .unsupported,
@@ -421,6 +431,14 @@ enum DockerCommandConverter {
         }
 
         let rest = Array(tokens.dropFirst())
+        if namespace == "image", commandName == "build" {
+            var notes = notes + buildNotes(for: rest)
+            return command(["build"] + mapBuildArguments(rest, notes: &notes), notes: notes)
+        }
+        if namespace == "image", commandName == "push" {
+            return mapImagePushCommand(rest, notes: notes)
+        }
+
         let mappedName: String
         switch commandName {
         case "ls":
@@ -444,7 +462,9 @@ enum DockerCommandConverter {
 
         var notes = notes
         let mappedRest: [String]
-        if mappedName == "list" {
+        if namespace == nil, mappedName == "run" || mappedName == "create" {
+            mappedRest = mapRunArguments(rest, notes: &notes)
+        } else if mappedName == "list" {
             mappedRest = mapListArguments(rest, notes: &notes)
         } else if namespace == nil, mappedName == "logs" {
             mappedRest = mapLogArguments(rest, notes: &notes)
@@ -454,6 +474,21 @@ enum DockerCommandConverter {
             mappedRest = rest
         }
         return command(arguments + mappedRest, notes: notes)
+    }
+
+    private static func mapImagePushCommand(
+        _ tokens: [String],
+        notes: [String]
+    ) -> DockerCommandConversionResult {
+        if containsOption(["--all-tags", "-a"], in: tokens) {
+            return .init(
+                status: .unsupported,
+                commands: [],
+                notes: notes + ["docker push --all-tags/-a 没有安全的 container image push 等价项；请逐个 tag 执行 docker push <image:tag>，或改写为 container image push <image:tag>。"]
+            )
+        }
+        var notes = notes
+        return command(["image", "push"] + mapImagePushArguments(tokens, notes: &notes), notes: notes)
     }
 
     private static func mapSystemCommand(_ tokens: [String], notes: [String]) -> DockerCommandConversionResult {
@@ -572,6 +607,177 @@ enum DockerCommandConverter {
         return output
     }
 
+    private static func mapBuildArguments(_ arguments: [String], notes: inout [String]) -> [String] {
+        mapLongOptionAliases(
+            arguments,
+            valueAliases: [
+                "--file": "-f",
+                "--tag": "-t",
+                "--label": "-l",
+                "--output": "-o",
+            ],
+            flagAliases: [:],
+            notes: &notes
+        )
+    }
+
+    private static func mapRunArguments(_ arguments: [String], notes: inout [String]) -> [String] {
+        let split = splitDockerRunOptionPrefix(expandCombinedRunShortFlags(arguments))
+        return mapLongOptionAliases(
+            split.options,
+            valueAliases: [
+                "--env": "-e",
+                "--publish": "-p",
+                "--volume": "-v",
+                "--label": "-l",
+                "--workdir": "-w",
+                "--user": "-u",
+                "--memory": "-m",
+                "--cpus": "-c",
+            ],
+            flagAliases: [
+                "--detach": "-d",
+                "--interactive": "-i",
+                "--tty": "-t",
+            ],
+            notes: &notes
+        ) + split.remainder
+    }
+
+    private static func mapImagePushArguments(_ arguments: [String], notes: inout [String]) -> [String] {
+        var output: [String] = []
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--disable-content-trust" {
+                notes.append("已忽略 Docker content trust 参数；container image push 不使用 Docker daemon trust 配置。")
+            } else if argument.hasPrefix("--disable-content-trust=") {
+                notes.append("已忽略 Docker content trust 参数；container image push 不使用 Docker daemon trust 配置。")
+            } else {
+                output.append(argument)
+            }
+            index += 1
+        }
+        return output
+    }
+
+    private static func mapLongOptionAliases(
+        _ arguments: [String],
+        valueAliases: [String: String],
+        flagAliases: [String: String],
+        notes: inout [String]
+    ) -> [String] {
+        var output: [String] = []
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if let mapped = flagAliases[argument] {
+                output.append(mapped)
+            } else if let mapped = valueAliases[argument] {
+                output.append(mapped)
+                if index + 1 < arguments.count {
+                    output.append(arguments[index + 1])
+                    index += 1
+                } else {
+                    notes.append("参数 \(argument) 缺少取值，已保留转换后的 \(mapped) 并交由 CLI 校验。")
+                }
+            } else if let (name, value) = splitLongOption(argument),
+                      let mapped = valueAliases[name] {
+                output.append(contentsOf: [mapped, value])
+            } else if let (name, _) = splitLongOption(argument),
+                      let mapped = flagAliases[name] {
+                output.append(mapped)
+            } else {
+                output.append(argument)
+            }
+            index += 1
+        }
+        return output
+    }
+
+    private static func expandCombinedRunShortFlags(_ arguments: [String]) -> [String] {
+        arguments.flatMap { argument -> [String] in
+            guard argument.hasPrefix("-"),
+                  !argument.hasPrefix("--"),
+                  argument.count > 2 else {
+                return [argument]
+            }
+            let flags = argument.dropFirst()
+            guard flags.allSatisfy({ $0 == "d" || $0 == "i" || $0 == "t" }) else {
+                return [argument]
+            }
+            return flags.map { "-\($0)" }
+        }
+    }
+
+    private static func splitDockerRunOptionPrefix(_ arguments: [String]) -> (options: [String], remainder: [String]) {
+        let optionsWithValues: Set<String> = [
+            "--add-host",
+            "--cap-add",
+            "--cap-drop",
+            "--cidfile",
+            "--cpus",
+            "--device",
+            "--dns",
+            "--dns-option",
+            "--dns-search",
+            "--entrypoint",
+            "--env",
+            "--env-file",
+            "--gpus",
+            "--hostname",
+            "--label",
+            "--memory",
+            "--mount",
+            "--name",
+            "--network",
+            "--platform",
+            "--publish",
+            "--pull",
+            "--restart",
+            "--runtime",
+            "--shm-size",
+            "--tmpfs",
+            "--ulimit",
+            "--user",
+            "--volume",
+            "--workdir",
+            "-c",
+            "-e",
+            "-h",
+            "-l",
+            "-m",
+            "-p",
+            "-u",
+            "-v",
+            "-w",
+        ]
+
+        var options: [String] = []
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                options.append(argument)
+                index += 1
+                break
+            }
+            guard argument.hasPrefix("-") else { break }
+
+            options.append(argument)
+            let optionName = splitLongOption(argument)?.name ?? argument
+            if splitLongOption(argument) == nil,
+               optionsWithValues.contains(optionName),
+               index + 1 < arguments.count {
+                index += 1
+                options.append(arguments[index])
+            }
+            index += 1
+        }
+
+        return (options, Array(arguments.dropFirst(index)))
+    }
+
     private static func dropDockerRemoveFlags(_ arguments: [String], notes: inout [String]) -> [String] {
         var output: [String] = []
         for argument in arguments {
@@ -646,19 +852,63 @@ enum DockerCommandConverter {
     }
 
     private static func riskNotes(for arguments: [String]) -> [String] {
-        let riskyFlags = [
-            "--privileged": "apple/container 对特权容器能力与 Docker 不完全一致，请核对。",
-            "--restart": "Docker restart policy 没有直接等价项，请手动确认运行策略。",
-            "--gpus": "GPU 参数没有直接等价项，请手动确认。",
-            "--device": "设备映射参数可能不适用于 apple/container。",
-            "--network=host": "host network 在 apple/container 中可能没有直接等价行为。",
-        ]
-
-        return riskyFlags.compactMap { flag, note in
-            arguments.contains { argument in
-                argument == flag || argument.hasPrefix("\(flag)=")
-            } ? note : nil
+        var notes: [String] = []
+        if containsOption(["--privileged"], in: arguments) {
+            notes.append("apple/container 对特权容器能力与 Docker 不完全一致，请核对。")
         }
+        if containsOption(["--restart"], in: arguments) {
+            notes.append("Docker restart policy 没有直接等价项，请手动确认运行策略。")
+        }
+        if containsOption(["--gpus"], in: arguments) {
+            notes.append("GPU 参数没有直接等价项，请手动确认。")
+        }
+        if containsOption(["--device"], in: arguments) {
+            notes.append("设备映射参数可能不适用于 apple/container。")
+        }
+        if containsOption(["--add-host"], in: arguments) {
+            notes.append("Docker --add-host 依赖 Docker 网络/daemon 解析行为，apple/container 可能没有等价效果，请核对。")
+        }
+        if containsOption(["--hostname"], in: arguments) {
+            notes.append("Docker hostname 参数与 apple/container 的主机名行为可能不完全一致，请核对。")
+        }
+        if containsOption(["--network"], in: arguments, valueMatches: { $0 == "host" }) {
+            notes.append("host network 在 apple/container 中可能没有直接等价行为。")
+        }
+        return notes
+    }
+
+    private static func containsOption(
+        _ names: [String],
+        in arguments: [String],
+        valueMatches: ((String?) -> Bool)? = nil
+    ) -> Bool {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            for name in names {
+                if argument == name {
+                    let value: String? = index + 1 < arguments.count ? arguments[index + 1] : nil
+                    if valueMatches?(value) ?? true {
+                        return true
+                    }
+                } else if let (option, value) = splitLongOption(argument), option == name {
+                    if valueMatches?(value) ?? true {
+                        return true
+                    }
+                }
+            }
+            index += 1
+        }
+        return false
+    }
+
+    private static func splitLongOption(_ argument: String) -> (name: String, value: String)? {
+        guard argument.hasPrefix("--"), let separator = argument.firstIndex(of: "=") else {
+            return nil
+        }
+        let name = String(argument[..<separator])
+        let value = String(argument[argument.index(after: separator)...])
+        return (name, value)
     }
 
     private static func stripPrompt(_ line: String) -> String {

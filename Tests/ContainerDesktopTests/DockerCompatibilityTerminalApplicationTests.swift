@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftTerm
 import Testing
 @testable import ContainerDesktop
 
@@ -43,6 +44,54 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(options?.workingDirectory == directory.standardizedFileURL)
     }
 
+    @MainActor
+    @Test("launch options resolve structured shell targets")
+    func launchOptionsResolveStructuredShellTargets() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let options = DockerCompatibilityTerminalApplication.launchOptions(arguments: [
+            "ContainerDesktop",
+            DockerCompatibilityTerminalApplication.argumentFlag,
+            DockerCompatibilityTerminalApplication.workingDirectoryFlag,
+            directory.path,
+            DockerCompatibilityTerminalApplication.shellTargetKindFlag,
+            "container",
+            DockerCompatibilityTerminalApplication.shellTargetIDFlag,
+            "web-1",
+        ])
+
+        #expect(options?.workingDirectory == directory.standardizedFileURL)
+        #expect(options?.shellTarget == .container(id: "web-1"))
+        #expect(DockerCompatibilityTerminalApplication.launchArguments(for: DockerCompatibilityTerminalOpenRequest(
+            workingDirectory: directory,
+            shellTarget: .machine(id: "dev-machine")
+        )) == [
+            DockerCompatibilityTerminalApplication.workingDirectoryFlag,
+            directory.standardizedFileURL.path,
+            DockerCompatibilityTerminalApplication.shellTargetKindFlag,
+            "machine",
+            DockerCompatibilityTerminalApplication.shellTargetIDFlag,
+            "dev-machine",
+        ])
+    }
+
+    @MainActor
+    @Test("embedded app notifications carry structured shell targets")
+    func embeddedAppNotificationsCarryStructuredShellTargets() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let request = DockerCompatibilityTerminalEmbeddedApp.openRequest(from: [
+            DockerCompatibilityTerminalEmbeddedApp.workingDirectoryUserInfoKey: directory.path,
+            DockerCompatibilityTerminalEmbeddedApp.shellTargetKindUserInfoKey: "machine",
+            DockerCompatibilityTerminalEmbeddedApp.shellTargetIDUserInfoKey: "dev-machine",
+        ])
+
+        #expect(request?.workingDirectory == directory.standardizedFileURL)
+        #expect(request?.shellTarget == .machine(id: "dev-machine"))
+    }
+
     @Test("terminal style preference falls back to default")
     func terminalStylePreferenceFallsBackToDefault() {
         let suiteName = "ContainerDesktopTests-\(UUID().uuidString)"
@@ -56,6 +105,24 @@ struct DockerCompatibilityTerminalApplicationTests {
 
         defaults.set("missing-style", forKey: DockerCompatibilityTerminalStyle.defaultsKey)
         #expect(DockerCompatibilityTerminalStyle.stored(in: defaults) == .defaultStyle)
+    }
+
+    @Test("terminal history settings default and clamp output event limit")
+    func terminalHistorySettingsDefaultAndClampOutputEventLimit() {
+        let suiteName = "ContainerDesktopTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: defaults) == 8_000)
+
+        defaults.set(500, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        #expect(DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: defaults) == 1_000)
+
+        defaults.set(80_000, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        #expect(DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: defaults) == 50_000)
+
+        defaults.set(12_000, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        #expect(DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: defaults) == 12_000)
     }
 
     @Test("standalone terminal resolves containing main application")
@@ -127,14 +194,20 @@ struct DockerCompatibilityTerminalApplicationTests {
     func terminalStringsLocalizeForBothLanguages() {
         #expect(DockerCompatibilityTerminalStrings.settingsWindowTitle(.zhHans) == "终端设置")
         #expect(DockerCompatibilityTerminalStrings.settingsWindowTitle(.en) == "Terminal Settings")
+        #expect(DockerCompatibilityTerminalStrings.settingsHeaderSubtitle(.zhHans) == "调整终端语言、输出缓存和外观。")
+        #expect(DockerCompatibilityTerminalStrings.settingsHeaderSubtitle(.en) == "Adjust the terminal language, output buffer, and appearance.")
         #expect(DockerCompatibilityTerminalStrings.settingsMenuTitle(.zhHans) == "终端设置…")
         #expect(DockerCompatibilityTerminalStrings.settingsMenuTitle(.en) == "Terminal Settings...")
         #expect(DockerCompatibilityTerminalStrings.openTerminalHelp(.zhHans) == "打开 Docker 兼容终端")
         #expect(DockerCompatibilityTerminalStrings.openTerminalHelp(.en) == "Open Docker compatibility terminal")
+        #expect(DockerCompatibilityTerminalStrings.outputBufferLinesTitle(.zhHans) == "输出缓存行数")
+        #expect(DockerCompatibilityTerminalStrings.outputBufferLinesTitle(.en) == "Output buffer lines")
         #expect(DockerCompatibilityTerminalStrings.newTab(.zhHans) == "新建 Tab")
         #expect(DockerCompatibilityTerminalStrings.newTab(.en) == "New Tab")
         #expect(DockerCompatibilityTerminalStrings.closeTab(.zhHans) == "关闭 Tab")
         #expect(DockerCompatibilityTerminalStrings.closeTab(.en) == "Close Tab")
+        #expect(ExternalTerminalDestination.systemTerminal.title(language: .zhHans) == "系统终端")
+        #expect(ExternalTerminalDestination.dockerCompatibilityTerminal.title(language: .en) == "Docker Compatibility Terminal")
     }
 
     @MainActor
@@ -198,6 +271,63 @@ struct DockerCompatibilityTerminalApplicationTests {
     }
 
     @MainActor
+    @Test("terminal control key mapper sends standard bytes")
+    func terminalControlKeyMapperSendsStandardBytes() {
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("c", modifiers: .control)) == [0x03])
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("D", modifiers: [.control, .shift])) == [0x04])
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("z", modifiers: .control)) == [0x1A])
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("\\", modifiers: .control)) == [0x1C])
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("l", modifiers: .control)) == [0x0C])
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("[", modifiers: .control)) == [0x1B])
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent(" ", modifiers: .control)) == [0x00])
+        #expect(TerminalControlKeyMapper.isInterrupt(keyEvent("c", modifiers: .control)))
+    }
+
+    @MainActor
+    @Test("terminal control key mapper leaves system shortcuts alone")
+    func terminalControlKeyMapperLeavesSystemShortcutsAlone() {
+        let leftArrow = String(UnicodeScalar(UInt32(NSLeftArrowFunctionKey))!)
+        let rightArrow = String(UnicodeScalar(UInt32(NSRightArrowFunctionKey))!)
+
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("c", modifiers: .command)) == nil)
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("c", modifiers: [.command, .control])) == nil)
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent("c", modifiers: [.option, .control])) == nil)
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent(leftArrow, modifiers: .control)) == nil)
+        #expect(TerminalControlKeyMapper.controlBytes(for: keyEvent(rightArrow, modifiers: .control)) == nil)
+    }
+
+    @MainActor
+    @Test("terminal view key equivalent sends Control-C byte")
+    func terminalViewKeyEquivalentSendsControlCByte() {
+        let view = FocusableTerminalView(frame: .zero)
+        let delegate = RecordingTerminalDelegate()
+        view.terminalDelegate = delegate
+
+        #expect(view.performKeyEquivalent(with: keyEvent("c", modifiers: .control)))
+
+        #expect(delegate.sentData == [Data([0x03])])
+    }
+
+    @Test("terminal settings view exposes output buffer controls")
+    func terminalSettingsViewExposesOutputBufferControls() throws {
+        let source = try String(contentsOfFile: "Sources/ContainerDesktop/Views/DockerCompatibilityTerminal/DockerCompatibilityTerminalStyleSettingsView.swift", encoding: .utf8)
+        let preferencesSource = try String(contentsOfFile: "Sources/ContainerDesktop/Support/AppPreferences.swift", encoding: .utf8)
+
+        #expect(source.contains("DockerCompatibilityTerminalSettingsSection"))
+        #expect(source.contains("case language"))
+        #expect(source.contains("case outputBuffer"))
+        #expect(source.contains("case appearance"))
+        #expect(source.contains("@State private var selectedSection"))
+        #expect(source.contains("settingsSidebar"))
+        #expect(source.contains("selectedSectionContent"))
+        #expect(source.contains("DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey"))
+        #expect(source.contains("TextField("))
+        #expect(source.contains("Stepper("))
+        #expect(source.contains("outputBufferSettings"))
+        #expect(preferencesSource.contains("containerdesktop.dockerCompatibilityTerminal.outputEventLimit"))
+    }
+
+    @MainActor
     @Test("docker terminal tabs store manages independent sessions")
     func dockerTerminalTabsStoreManagesIndependentSessions() throws {
         let directory = try makeTemporaryDirectory()
@@ -233,15 +363,37 @@ struct DockerCompatibilityTerminalApplicationTests {
     }
 
     @MainActor
-    @Test("closing final docker terminal tab requests window close")
-    func closingFinalDockerTerminalTabRequestsWindowClose() {
+    @Test("docker terminal tabs support structured shell targets")
+    func dockerTerminalTabsSupportStructuredShellTargets() {
+        let tabsStore = DockerCompatibilityTerminalTabsStore(
+            initialRequest: DockerCompatibilityTerminalOpenRequest(shellTarget: .container(id: "web-1"))
+        )
+        let firstTab = try! #require(tabsStore.selectedTab)
+
+        #expect(firstTab.title == "Container web-1")
+        #expect(firstTab.shellTarget == .container(id: "web-1"))
+        #expect(firstTab.store.openRequest.shellTarget == .container(id: "web-1"))
+
+        let machineTab = tabsStore.newTab(request: DockerCompatibilityTerminalOpenRequest(shellTarget: .machine(id: "dev-machine")))
+        #expect(machineTab.title == "Machine dev-machine")
+        #expect(machineTab.shellTarget == .machine(id: "dev-machine"))
+        #expect(tabsStore.selectedTabID == machineTab.id)
+    }
+
+    @MainActor
+    @Test("closing final docker terminal tab replaces it without closing window")
+    func closingFinalDockerTerminalTabReplacesItWithoutClosingWindow() {
         let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: AppPaths.homeDirectory)
+        let originalTab = try! #require(tabsStore.selectedTab)
 
-        tabsStore.selectedTab?.store.terminalState = .connected
+        originalTab.store.terminalState = .connected
 
-        #expect(tabsStore.closeSelectedTab() == .closedLastTab)
-        #expect(tabsStore.tabs.isEmpty)
-        #expect(tabsStore.selectedTabID == nil)
+        #expect(tabsStore.closeSelectedTab() == .replacedLastTab)
+        #expect(originalTab.store.terminalState == .disconnected)
+        #expect(tabsStore.tabs.count == 1)
+        #expect(tabsStore.selectedTabID == tabsStore.selectedTab?.id)
+        #expect(tabsStore.selectedTab?.id != originalTab.id)
+        #expect(tabsStore.selectedTab?.workingDirectory == AppPaths.homeDirectory.standardizedFileURL)
     }
 
     @MainActor
@@ -254,6 +406,86 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(DockerCompatibilityTerminalTabKeyCommand.command(for: keyEvent("t", modifiers: [.command, .option])) == nil)
     }
 
+    @MainActor
+    @Test("docker terminal window interrupts from chrome focus")
+    func dockerTerminalWindowInterruptsFromChromeFocus() {
+        let window = DockerCompatibilityTerminalWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            window.onSendInterrupt = nil
+        }
+        var interruptCount = 0
+        window.onSendInterrupt = {
+            interruptCount += 1
+        }
+
+        #expect(window.performKeyEquivalent(with: keyEvent("c", modifiers: .control)))
+        #expect(interruptCount == 1)
+
+        _ = window.performKeyEquivalent(with: keyEvent("c", modifiers: .command))
+        #expect(interruptCount == 1)
+
+        let terminalView = FocusableTerminalView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+        window.contentView = terminalView
+        #expect(window.makeFirstResponder(terminalView))
+
+        _ = window.performKeyEquivalent(with: keyEvent("c", modifiers: .control))
+        #expect(interruptCount == 1)
+    }
+
+    @MainActor
+    @Test("docker terminal top chrome double click zoom hit testing")
+    func dockerTerminalTopChromeDoubleClickZoomHitTesting() {
+        let size = NSSize(width: 900, height: 560)
+
+        #expect(DockerCompatibilityTerminalWindow.shouldPerformTopChromeDoubleClickZoom(
+            at: NSPoint(x: 450, y: 559),
+            in: size
+        ))
+        #expect(DockerCompatibilityTerminalWindow.shouldPerformTopChromeDoubleClickZoom(
+            at: NSPoint(x: 450, y: 516),
+            in: size
+        ))
+        #expect(!DockerCompatibilityTerminalWindow.shouldPerformTopChromeDoubleClickZoom(
+            at: NSPoint(x: 450, y: 515),
+            in: size
+        ))
+        #expect(!DockerCompatibilityTerminalWindow.shouldPerformTopChromeDoubleClickZoom(
+            at: NSPoint(x: 40, y: 548),
+            in: size
+        ))
+        #expect(!DockerCompatibilityTerminalWindow.shouldPerformTopChromeDoubleClickZoom(
+            at: NSPoint(x: 870, y: 548),
+            in: size
+        ))
+        #expect(!DockerCompatibilityTerminalWindow.shouldPerformTopChromeDoubleClickZoom(
+            at: NSPoint(x: 450, y: 580),
+            in: size
+        ))
+    }
+
+    @Test("docker terminal window handles top chrome double click zoom")
+    func dockerTerminalWindowHandlesTopChromeDoubleClickZoom() throws {
+        let source = try String(
+            contentsOfFile: "Sources/ContainerDesktop/App/DockerCompatibilityTerminalWindow.swift",
+            encoding: .utf8
+        )
+
+        #expect(source.contains("static let topChromeDoubleClickHeight: CGFloat = 44"))
+        #expect(source.contains("static let trailingChromeControlReservedWidth: CGFloat = 52"))
+        #expect(source.contains("override func sendEvent(_ event: NSEvent)"))
+        #expect(source.contains("event.type == .leftMouseDown"))
+        #expect(source.contains("event.clickCount == 2"))
+        #expect(source.contains("performZoom(nil)"))
+        #expect(source.contains("shouldPerformTopChromeDoubleClickZoom(at: event.locationInWindow)"))
+    }
+
     @Test("main app fallback uses terminal window for scoped tab shortcuts")
     func mainAppFallbackUsesTerminalWindowForScopedTabShortcuts() throws {
         let source = try String(contentsOfFile: "Sources/ContainerDesktop/App/ContainerDesktopApp.swift", encoding: .utf8)
@@ -261,6 +493,121 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(source.contains("DockerCompatibilityTerminalWindow(contentViewController: hostingController)"))
         #expect(source.contains("configureDockerCompatibilityTerminalTabKeyCommands(on: window)"))
         #expect(source.contains("addTabIfWindowExists: true"))
+        #expect(source.contains("openDockerCompatibilityTerminalRequest"))
+        #expect(source.contains("tabsStore.newTab(request: request)"))
+    }
+
+    @Test("terminal interrupt is wired in standalone and fallback windows")
+    func terminalInterruptIsWiredInStandaloneAndFallbackWindows() throws {
+        let standaloneSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/DockerCompatibilityTerminalApplication.swift", encoding: .utf8)
+        let mainSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/ContainerDesktopApp.swift", encoding: .utf8)
+
+        #expect(standaloneSource.contains("window.onSendInterrupt"))
+        #expect(standaloneSource.contains("tabsStore?.selectedTab?.store.sendTerminalInputData"))
+        #expect(mainSource.contains("window.onSendInterrupt"))
+        #expect(mainSource.contains("dockerCompatibilityTerminalTabsStore?.selectedTab?.store.sendTerminalInputData"))
+    }
+
+    @Test("external terminal targets build container cli arguments")
+    func externalTerminalTargetsBuildContainerCLIArguments() throws {
+        #expect(TerminalShellTarget.container(id: "web-1").containerCLIArguments == [
+            "container", "exec", "-it", "web-1", "sh",
+        ])
+        #expect(TerminalShellTarget.machine(id: "dev-machine").containerCLIArguments == [
+            "container", "machine", "run", "-n", "dev-machine", "-i", "-t", "--", "sh",
+        ])
+        #expect(TerminalShellTarget.container(id: "1234567890abcdef").tabTitle == "Container 1234567890abcdef")
+        #expect(TerminalShellTarget.container(id: "1234567890abcdef-extra").tabTitle == "Container 1234567890ab")
+
+        let serviceSource = try String(contentsOfFile: "Sources/ContainerDesktop/Services/DockerCompatibilityTerminalService.swift", encoding: .utf8)
+        #expect(serviceSource.contains("executable: \"/usr/bin/env\""))
+        #expect(serviceSource.contains("arguments: shellTarget.containerCLIArguments"))
+    }
+
+    @Test("resource terminal menus expose both destinations")
+    func resourceTerminalMenusExposeBothDestinations() throws {
+        let files = [
+            "Sources/ContainerDesktop/Views/Resources/ContainersView.swift",
+            "Sources/ContainerDesktop/Views/Resources/MachinesView.swift",
+            "Sources/ContainerDesktop/Views/Resources/ContainerDetail/ContainerExecTabView.swift",
+            "Sources/ContainerDesktop/Views/Resources/MachineDetail/MachineExecTabView.swift",
+            "Sources/ContainerDesktop/Views/Compose/ComposeServiceRuntimeMenu.swift",
+        ]
+
+        for file in files {
+            let source = try String(contentsOfFile: file, encoding: .utf8)
+            #expect(source.contains("ExternalTerminalDestinationMenuItems"))
+        }
+
+        let commonSource = try String(contentsOfFile: "Sources/ContainerDesktop/Views/Common/ResourcePageParts.swift", encoding: .utf8)
+        #expect(commonSource.contains("struct RowActionMenuButton"))
+        #expect(commonSource.contains("ExternalTerminalDestination.allCases"))
+    }
+
+    @MainActor
+    @Test("terminal window chrome follows terminal style")
+    func terminalWindowChromeFollowsTerminalStyle() {
+        let window = NSWindow()
+        defer { window.orderOut(nil) }
+
+        DockerCompatibilityTerminalWindowChrome.apply(
+            to: window,
+            title: "Docker 兼容终端",
+            style: .containerDark
+        )
+
+        #expect(window.title == "Docker 兼容终端")
+        #expect(window.styleMask.contains(.fullSizeContentView))
+        #expect(window.titleVisibility == .hidden)
+        #expect(window.titlebarAppearsTransparent)
+        #expect(window.titlebarSeparatorStyle == .none)
+        #expect(window.toolbar == nil)
+        #expect(window.appearance?.name == .darkAqua)
+        #expect(nsColorsMatch(window.backgroundColor, DockerCompatibilityTerminalWindowChrome.palette(for: .containerDark).windowBackgroundColor))
+
+        DockerCompatibilityTerminalWindowChrome.apply(
+            to: window,
+            title: "Docker Compatibility Terminal",
+            style: .paper
+        )
+
+        #expect(window.title == "Docker Compatibility Terminal")
+        #expect(window.appearance?.name == .aqua)
+        #expect(nsColorsMatch(window.backgroundColor, DockerCompatibilityTerminalWindowChrome.palette(for: .paper).windowBackgroundColor))
+        #expect(DockerCompatibilityTerminalWindowChrome.palette(for: .paper).preferredColorScheme == .light)
+        #expect(DockerCompatibilityTerminalWindowChrome.palette(for: .graphite).preferredColorScheme == .dark)
+    }
+
+    @Test("terminal windows hide instead of closing")
+    func terminalWindowsHideInsteadOfClosing() throws {
+        let standaloneSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/DockerCompatibilityTerminalApplication.swift", encoding: .utf8)
+        let mainSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/ContainerDesktopApp.swift", encoding: .utf8)
+
+        #expect(standaloneSource.contains("func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {\n        false\n    }"))
+        #expect(standaloneSource.contains("func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool"))
+        #expect(standaloneSource.contains("func windowShouldClose(_ sender: NSWindow) -> Bool"))
+        #expect(standaloneSource.contains("sender.orderOut(nil)"))
+        #expect(mainSource.contains("func windowShouldClose(_ sender: NSWindow) -> Bool"))
+        #expect(mainSource.contains("sender.orderOut(nil)"))
+
+        let standaloneShouldClose = try #require(standaloneSource.range(of: "func windowShouldClose(_ sender: NSWindow) -> Bool"))
+        let standaloneSnippet = String(standaloneSource[standaloneShouldClose.lowerBound...].prefix(220))
+        #expect(!standaloneSnippet.contains("stopAll()"))
+
+        let mainShouldClose = try #require(mainSource.range(of: "func windowShouldClose(_ sender: NSWindow) -> Bool"))
+        let mainSnippet = String(mainSource[mainShouldClose.lowerBound...].prefix(220))
+        #expect(!mainSnippet.contains("stopAll()"))
+    }
+
+    @Test("terminal style participates in chrome refresh")
+    func terminalStyleParticipatesInChromeRefresh() throws {
+        let standaloneSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/DockerCompatibilityTerminalApplication.swift", encoding: .utf8)
+        let mainSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/ContainerDesktopApp.swift", encoding: .utf8)
+
+        #expect(standaloneSource.contains("terminalStyle: terminalStyle"))
+        #expect(mainSource.contains("terminalStyle: dockerCompatibilityTerminalStyle"))
+        #expect(standaloneSource.contains("applyTerminalWindowChrome(to: window)"))
+        #expect(mainSource.contains("applyDockerCompatibilityTerminalWindowChrome(dockerCompatibilityTerminalWindow)"))
     }
 
     @MainActor
@@ -283,6 +630,40 @@ struct DockerCompatibilityTerminalApplicationTests {
     }
 
     @MainActor
+    @Test("docker terminal trims output events using configured limit")
+    func dockerTerminalTrimsOutputEventsUsingConfiguredLimit() {
+        let suiteName = "ContainerDesktopTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(1_000, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        let store = DockerCompatibilityTerminalStore(
+            historyDefaults: defaults,
+            workingDirectory: AppPaths.homeDirectory
+        )
+
+        for index in 1...1_050 {
+            store.appendTerminalChunk("line-\(index)\n", flushImmediately: true)
+        }
+
+        #expect(store.terminalOutputEvents.count == 1_000)
+        #expect(store.terminalOutputEvents.first?.sequence == 51)
+        #expect(store.terminalOutputEvents.last?.text == "line-1050\n")
+
+        defaults.set(2_000, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        for index in 1_051...1_650 {
+            store.appendTerminalChunk("line-\(index)\n", flushImmediately: true)
+        }
+        #expect(store.terminalOutputEvents.count == 1_600)
+        #expect(store.terminalOutputEvents.first?.sequence == 51)
+
+        defaults.set(1_000, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        store.appendTerminalChunk("line-1651\n", flushImmediately: true)
+        #expect(store.terminalOutputEvents.count == 1_000)
+        #expect(store.terminalOutputEvents.first?.sequence == 652)
+        #expect(store.terminalOutputEvents.last?.text == "line-1651\n")
+    }
+
+    @MainActor
     @Test("terminal feed skips trimmed event gaps without reset")
     func terminalFeedSkipsTrimmedEventGapsWithoutReset() {
         let terminalView = FocusableTerminalView(frame: .zero)
@@ -290,6 +671,7 @@ struct DockerCompatibilityTerminalApplicationTests {
             onInput: { _ in },
             onSizeChange: { _, _ in }
         )
+        coordinator.sizeChanged(source: terminalView, newCols: 120, newRows: 30)
 
         coordinator.feed(
             terminalView,
@@ -310,6 +692,79 @@ struct DockerCompatibilityTerminalApplicationTests {
 
         #expect(coordinator.resetCount == 1)
         #expect(coordinator.skippedOutputGapCount == 1)
+    }
+
+    @MainActor
+    @Test("terminal snapshot replay waits for usable size")
+    func terminalSnapshotReplayWaitsForUsableSize() {
+        let terminalView = FocusableTerminalView(frame: .zero)
+        let coordinator = SwiftTermTerminalView.Coordinator(
+            onInput: { _ in },
+            onSizeChange: { _, _ in }
+        )
+
+        coordinator.feed(
+            terminalView,
+            textSnapshot: "web: booting\n",
+            outputEvents: [TerminalOutputEvent(sequence: 1, text: "web: booting\n")],
+            outputSequence: 1,
+            resetSequence: 1
+        )
+
+        #expect(coordinator.resetCount == 0)
+        #expect(coordinator.isSnapshotReplayPending)
+        #expect(coordinator.pendingReplayCount == 1)
+
+        coordinator.sizeChanged(source: terminalView, newCols: 2, newRows: 24)
+        #expect(coordinator.resetCount == 0)
+        #expect(coordinator.isSnapshotReplayPending)
+
+        coordinator.sizeChanged(source: terminalView, newCols: 120, newRows: 30)
+        #expect(coordinator.resetCount == 1)
+        #expect(!coordinator.isSnapshotReplayPending)
+
+        coordinator.feed(
+            terminalView,
+            textSnapshot: "web: booting\nready\n",
+            outputEvents: [TerminalOutputEvent(sequence: 2, text: "ready\n")],
+            outputSequence: 2,
+            resetSequence: 1
+        )
+        #expect(coordinator.resetCount == 1)
+    }
+
+    @MainActor
+    @Test("terminal reset sequence replay waits for usable size")
+    func terminalResetSequenceReplayWaitsForUsableSize() {
+        let terminalView = FocusableTerminalView(frame: .zero)
+        let coordinator = SwiftTermTerminalView.Coordinator(
+            onInput: { _ in },
+            onSizeChange: { _, _ in }
+        )
+
+        coordinator.feed(
+            terminalView,
+            textSnapshot: "",
+            outputEvents: [],
+            outputSequence: 0,
+            resetSequence: 1
+        )
+        #expect(coordinator.resetCount == 1)
+        #expect(!coordinator.isSnapshotReplayPending)
+
+        coordinator.feed(
+            terminalView,
+            textSnapshot: "after reset\n",
+            outputEvents: [TerminalOutputEvent(sequence: 1, text: "after reset\n")],
+            outputSequence: 1,
+            resetSequence: 2
+        )
+        #expect(coordinator.resetCount == 1)
+        #expect(coordinator.isSnapshotReplayPending)
+
+        coordinator.sizeChanged(source: terminalView, newCols: 120, newRows: 30)
+        #expect(coordinator.resetCount == 2)
+        #expect(!coordinator.isSnapshotReplayPending)
     }
 
     @MainActor
@@ -338,12 +793,41 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(bundleScript.contains("<string>DockerCompatibilityTerminalIcon</string>"))
     }
 
+    @Test("finder services registration opens docker compatibility terminal")
+    func finderServicesRegistrationOpensDockerCompatibilityTerminal() throws {
+        let buildScript = try String(contentsOfFile: "script/build_and_run.sh", encoding: .utf8)
+        let bundleScript = try String(contentsOfFile: "script/lib/macos_bundle.sh", encoding: .utf8)
+        let appSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/ContainerDesktopApp.swift", encoding: .utf8)
+        let englishServices = try String(contentsOfFile: "Resources/en.lproj/ServicesMenu.strings", encoding: .utf8)
+        let chineseServices = try String(contentsOfFile: "Resources/zh-Hans.lproj/ServicesMenu.strings", encoding: .utf8)
+
+        for source in [buildScript, bundleScript] {
+            #expect(source.contains("<key>NSServices</key>"))
+            #expect(source.contains("<string>openDockerCompatibilityTerminal</string>"))
+            #expect(source.contains("<key>NSPortName</key>"))
+            #expect(source.contains("<key>NSSendTypes</key>"))
+            #expect(source.contains("<string>NSFilenamesPboardType</string>"))
+            #expect(source.contains("<string>public.file-url</string>"))
+            #expect(source.contains("<key>NSSendFileTypes</key>"))
+            #expect(source.contains("<string>public.folder</string>"))
+            #expect(source.contains("<key>NSRequiredContext</key>"))
+            #expect(source.contains("<string>com.apple.finder</string>"))
+        }
+        #expect(buildScript.contains("lsregister"))
+        #expect(appSource.contains("NSApp.servicesProvider = self"))
+        #expect(appSource.contains("NSUpdateDynamicServices()"))
+        #expect(englishServices.contains("\"在 Docker 兼容终端中打开\" = \"Open in Docker Compatibility Terminal\";"))
+        #expect(chineseServices.contains("\"在 Docker 兼容终端中打开\" = \"在 Docker 兼容终端中打开\";"))
+    }
+
     @Test("service request resolves file URL pasteboard items")
     func serviceRequestResolvesPasteboardURLs() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let projectDirectory = directory.appending(path: "Project", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+        let projectFile = projectDirectory.appending(path: "README.md")
+        try "demo".write(to: projectFile, atomically: true, encoding: .utf8)
 
         let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
         defer { pasteboard.releaseGlobally() }
@@ -351,6 +835,11 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(pasteboard.writeObjects([projectDirectory as NSURL]))
 
         #expect(DockerCompatibilityTerminalServiceRequest.workingDirectory(from: pasteboard) == projectDirectory.standardizedFileURL)
+
+        pasteboard.clearContents()
+        #expect(pasteboard.writeObjects([projectFile as NSURL]))
+        #expect(DockerCompatibilityTerminalServiceRequest.workingDirectory(from: pasteboard) == projectDirectory.standardizedFileURL)
+        #expect(DockerCompatibilityTerminalServiceRequest.workingDirectory(fromPath: projectDirectory.appending(path: "missing").path) == nil)
     }
 
     private func makeTemporaryDirectory() throws -> URL {
@@ -358,6 +847,18 @@ struct DockerCompatibilityTerminalApplicationTests {
             .appending(path: "ContainerDesktopTests-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func nsColorsMatch(_ lhs: NSColor, _ rhs: NSColor, tolerance: CGFloat = 0.0001) -> Bool {
+        guard let lhs = lhs.usingColorSpace(.sRGB),
+              let rhs = rhs.usingColorSpace(.sRGB)
+        else {
+            return lhs.isEqual(rhs)
+        }
+        return abs(lhs.redComponent - rhs.redComponent) <= tolerance
+            && abs(lhs.greenComponent - rhs.greenComponent) <= tolerance
+            && abs(lhs.blueComponent - rhs.blueComponent) <= tolerance
+            && abs(lhs.alphaComponent - rhs.alphaComponent) <= tolerance
     }
 
     @MainActor
@@ -375,4 +876,30 @@ struct DockerCompatibilityTerminalApplicationTests {
             keyCode: 0
         )!
     }
+}
+
+private final class RecordingTerminalDelegate: TerminalViewDelegate {
+    var sentData: [Data] = []
+
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
+
+    func setTerminalTitle(source: TerminalView, title: String) {}
+
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+    func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        sentData.append(Data(data))
+    }
+
+    func scrolled(source: TerminalView, position: Double) {}
+
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+
+    func bell(source: TerminalView) {}
+
+    func clipboardCopy(source: TerminalView, content: Data) {}
+
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }

@@ -34,6 +34,21 @@ struct NetworksViewNavigationTests {
         #expect(!source.contains("private struct NetworkDetailOverview"))
     }
 
+    @Test("network create form exposes advanced options")
+    func networkCreateFormExposesAdvancedOptions() throws {
+        let source = try networksViewSource()
+
+        #expect(source.contains("@State private var plugin = \"\""))
+        #expect(source.contains("@State private var labels = \"\""))
+        #expect(source.contains("@State private var options = \"\""))
+        #expect(source.contains("DisclosureGroup("))
+        #expect(source.contains("NetworkCreateOptions("))
+        #expect(source.contains("plugin: plugin"))
+        #expect(source.contains("labels: lines(from: labels)"))
+        #expect(source.contains("options: lines(from: options)"))
+        #expect(source.contains("runtimeStore.createNetwork(options: createOptions)"))
+    }
+
     @Test("network detail page contains header tabs and inspect content")
     func networkDetailPageStructure() throws {
         let page = try source("Sources/ContainerDesktop/Views/Resources/NetworkDetail/NetworkDetailPage.swift")

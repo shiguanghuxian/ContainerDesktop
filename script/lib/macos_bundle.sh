@@ -36,6 +36,7 @@ create_macos_app_bundle() {
   local app_resources="$app_contents/Resources"
   local app_binary="$app_macos/$app_name"
   local info_plist="$app_contents/Info.plist"
+  local resources_root="$(dirname "$icon_source")"
 
   [[ -x "$source_binary" ]] || release_error "Release 可执行文件不存在或不可执行：$source_binary"
 
@@ -50,6 +51,12 @@ create_macos_app_bundle() {
   else
     release_warn "未找到图标文件：$icon_source"
   fi
+  for locale in en.lproj zh-Hans.lproj; do
+    if [[ -f "$resources_root/$locale/ServicesMenu.strings" ]]; then
+      mkdir -p "$app_resources/$locale"
+      cp "$resources_root/$locale/ServicesMenu.strings" "$app_resources/$locale/ServicesMenu.strings"
+    fi
+  done
 
   cat >"$info_plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -84,6 +91,34 @@ create_macos_app_bundle() {
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>在 Docker 兼容终端中打开</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>openDockerCompatibilityTerminal</string>
+      <key>NSPortName</key>
+      <string>$app_name</string>
+      <key>NSRequiredContext</key>
+      <dict>
+        <key>NSApplicationIdentifier</key>
+        <string>com.apple.finder</string>
+      </dict>
+      <key>NSSendFileTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
+      <key>NSSendTypes</key>
+      <array>
+        <string>NSFilenamesPboardType</string>
+        <string>public.file-url</string>
+      </array>
+    </dict>
+  </array>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
 </dict>

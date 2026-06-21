@@ -12,7 +12,7 @@ struct MachineOverviewTabView: View {
                     DetailInfoCard {
                         DetailInfoRow(title: language.t(.status), value: machine.statusText)
                         DetailInfoRow(title: language.t(.defaultMachine), value: machine.isDefault ? "Yes" : "No")
-                        DetailInfoRow(title: "IP", value: machine.ipAddressText, monospaced: true)
+                        CopyableIPAddressInfoRow(title: "IP", value: machine.ipAddressText)
                         DetailInfoRow(title: language.t(.created), value: inspection?.createdText ?? machine.createdText)
                         DetailInfoRow(title: "Started", value: inspection?.startedText ?? "—")
                         if let containerId = inspection?.containerId {

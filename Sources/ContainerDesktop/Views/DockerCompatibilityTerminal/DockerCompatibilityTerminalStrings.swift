@@ -8,7 +8,9 @@ enum DockerCompatibilityTerminalStrings {
     }
 
     static func settingsHeaderSubtitle(_ language: AppLanguage) -> String {
-        language.resolved == .zhHans ? "调整终端语言和外观。" : "Adjust the terminal language and appearance."
+        language.resolved == .zhHans
+            ? "调整终端语言、输出缓存和外观。"
+            : "Adjust the terminal language, output buffer, and appearance."
     }
 
     static func settingsMenuTitle(_ language: AppLanguage) -> String {
@@ -157,6 +159,26 @@ enum DockerCompatibilityTerminalStrings {
 
     static func languageSubtitle(_ language: AppLanguage) -> String {
         language.resolved == .zhHans ? "终端界面语言" : "Terminal interface language"
+    }
+
+    static func outputBufferTitle(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "输出缓存" : "Output buffer"
+    }
+
+    static func outputBufferSubtitle(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans
+            ? "控制 Docker 兼容终端切换 Tab 或重放历史时保留的输出事件数。"
+            : "Controls how many output events are kept when the Docker compatibility terminal replays history or switches tabs."
+    }
+
+    static func outputBufferLinesTitle(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "输出缓存行数" : "Output buffer lines"
+    }
+
+    static func outputBufferLinesHelp(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans
+            ? "默认 8000，范围 1000-50000；不改变终端字符缓存或构建进度输出格式。"
+            : "Default 8000, range 1000-50000; does not change the terminal text cache or build progress output format."
     }
 
     static func styleSectionTitle(_ language: AppLanguage) -> String {

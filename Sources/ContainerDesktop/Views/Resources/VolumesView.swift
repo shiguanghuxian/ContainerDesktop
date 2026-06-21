@@ -1,16 +1,63 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
+
+private enum VolumeKindFilter: String, CaseIterable, Identifiable {
+    case all
+    case named
+    case anonymous
+
+    var id: String { rawValue }
+
+    func title(language: AppLanguage) -> String {
+        switch self {
+        case .all:
+            language.resolved == .zhHans ? "全部类型" : "All Types"
+        case .named:
+            language.resolved == .zhHans ? "命名卷" : "Named"
+        case .anonymous:
+            language.resolved == .zhHans ? "匿名卷" : "Anonymous"
+        }
+    }
+}
+
+private enum VolumeSortOption: String, CaseIterable, Identifiable {
+    case name
+    case createdNewest
+    case createdOldest
+    case sizeLargest
+    case sizeSmallest
+
+    var id: String { rawValue }
+
+    func title(language: AppLanguage) -> String {
+        switch self {
+        case .name:
+            language.resolved == .zhHans ? "名称" : "Name"
+        case .createdNewest:
+            language.resolved == .zhHans ? "最新创建" : "Newest"
+        case .createdOldest:
+            language.resolved == .zhHans ? "最早创建" : "Oldest"
+        case .sizeLargest:
+            language.resolved == .zhHans ? "大小降序" : "Largest"
+        case .sizeSmallest:
+            language.resolved == .zhHans ? "大小升序" : "Smallest"
+        }
+    }
+}
 
 struct VolumesView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
     @State private var searchText = ""
+    @State private var kindFilter: VolumeKindFilter = .all
+    @State private var sortOption: VolumeSortOption = .name
     @State private var newVolumeName = ""
     @State private var newVolumeSize = ""
     @State private var newVolumeLabels = ""
     @State private var newVolumeOptions = ""
     @State private var showCreatePopover = false
+    @State private var detailName: String?
+    @State private var detailInitialTab: VolumeDetailTab = .overview
     @State private var selectedName: String?
     @State private var pendingDelete: VolumeSummary?
     @State private var pendingEmpty: VolumeSummary?
@@ -19,14 +66,68 @@ struct VolumesView: View {
     @State private var cloneVolumeSize = ""
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var isConfirmingPrune = false
-    @State private var volumeBrowserStore = VolumeBrowserStore()
 
     private var filteredVolumes: [VolumeSummary] {
         let query = searchText.trimmed.lowercased()
-        guard !query.isEmpty else { return runtimeStore.volumes }
-        return runtimeStore.volumes.filter {
-            $0.name.lowercased().contains(query) || $0.source.lowercased().contains(query)
+        return runtimeStore.volumes
+            .filter { volume in
+                switch kindFilter {
+                case .all:
+                    true
+                case .named:
+                    !volume.isAnonymous
+                case .anonymous:
+                    volume.isAnonymous
+                }
+            }
+            .filter { volume in
+                query.isEmpty
+                    || volume.name.lowercased().contains(query)
+                    || volume.source.lowercased().contains(query)
+                    || volume.driver.lowercased().contains(query)
+                    || volume.typeText.lowercased().contains(query)
+            }
+            .sorted { lhs, rhs in
+                switch sortOption {
+                case .name:
+                    lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                case .createdNewest:
+                    lhs.configuration.creationDate > rhs.configuration.creationDate
+                case .createdOldest:
+                    lhs.configuration.creationDate < rhs.configuration.creationDate
+                case .sizeLargest:
+                    (lhs.configuration.sizeInBytes ?? 0) > (rhs.configuration.sizeInBytes ?? 0)
+                case .sizeSmallest:
+                    (lhs.configuration.sizeInBytes ?? UInt64.max) < (rhs.configuration.sizeInBytes ?? UInt64.max)
+                }
+            }
+    }
+
+    private var demoVolumeCommand: String {
+        """
+        container volume create --label purpose=ui-test --label demo=container-desktop cd-demo-empty
+        container volume create --label purpose=ui-test --label demo=container-desktop --label content=files -s 64M cd-demo-files
+        container volume create --label purpose=ui-test --label demo=container-desktop --label role=cache -s 128M cd-demo-cache
+        container run --rm -v cd-demo-files:/mnt docker.io/library/alpine:3.22 sh -c 'mkdir -p /mnt/config /mnt/logs /mnt/data && printf "# ContainerDesktop volume demo\\n\\nThis file was generated for testing the Volumes page.\\n" > /mnt/README.md && printf "APP_ENV=demo\\nCACHE_DRIVER=file\\n" > /mnt/config/app.env && printf "2026-06-18T14:00:00Z demo volume initialized\\n2026-06-18T14:01:00Z files ready\\n" > /mnt/logs/app.log && printf "{\\n  \\"name\\": \\"cd-demo-files\\",\\n  \\"items\\": [\\"README.md\\", \\"config/app.env\\", \\"logs/app.log\\"]\\n}\\n" > /mnt/data/sample.json'
+        # cleanup:
+        container volume delete cd-demo-empty cd-demo-files cd-demo-cache cd-demo-files-copy
+        """
+    }
+
+    private var pruneReferenceHint: String {
+        language.resolved == .zhHans
+            ? "当前 CLI 会删除没有容器引用的卷；如果有容器仍在使用，命令会保留或返回错误。"
+            : "The CLI removes volumes with no container references; referenced volumes are kept or reported as errors."
+    }
+
+    private func deleteReferenceHint(for volume: VolumeSummary) -> String {
+        let base = language.resolved == .zhHans
+            ? "如果该卷仍被容器引用，CLI 会拒绝删除。"
+            : "If the volume is still referenced by a container, the CLI will reject deletion."
+        guard !volume.isAnonymous else {
+            return base + (language.resolved == .zhHans ? " 这是匿名卷，建议先确认对应容器。" : " This is an anonymous volume; check the related container first.")
         }
+        return base
     }
 
     private var selectedVolume: VolumeSummary? {
@@ -34,52 +135,45 @@ struct VolumesView: View {
         return runtimeStore.volumes.first { $0.name == selectedName }
     }
 
+    private var isDetailPresented: Binding<Bool> {
+        Binding(
+            get: { detailName != nil },
+            set: { if !$0 { detailName = nil } }
+        )
+    }
+
     var body: some View {
-        DrawerPageLayout(isDrawerPresented: selectedVolume != nil, onDismiss: {
-            selectedName = nil
-        }) {
-            pageContent
-        } drawer: {
-            if let selectedVolume {
-                DetailDrawer(
-                    mode: $drawerMode,
-                    title: selectedVolume.name,
-                    subtitle: "container volume inspect",
-                    systemImage: "externaldrive",
-                    rawText: runtimeStore.selectedInspectorText,
-                    onClose: {
-                        selectedName = nil
-                    }
-                ) {
-                    VolumeDetailOverview(
-                        volume: selectedVolume,
-                        browserStore: volumeBrowserStore,
-                        onOpenEntry: { entry in
-                            if entry.isDirectory {
-                                volumeBrowserStore.open(entry)
-                            } else {
-                                NSWorkspace.shared.activateFileViewerSelecting([entry.url])
+        Group {
+            if let detailName {
+                VolumeDetailPage(
+                    runtimeStore: runtimeStore,
+                    name: detailName,
+                    initialTab: detailInitialTab,
+                    isPresented: isDetailPresented
+                )
+            } else {
+                DrawerPageLayout(isDrawerPresented: selectedVolume != nil, onDismiss: {
+                    selectedName = nil
+                }) {
+                    pageContent
+                } drawer: {
+                    if let selectedVolume {
+                        DetailDrawer(
+                            mode: $drawerMode,
+                            title: selectedVolume.name,
+                            subtitle: "container volume inspect",
+                            systemImage: "externaldrive",
+                            rawText: runtimeStore.selectedInspectorText,
+                            onClose: {
+                                selectedName = nil
                             }
-                        },
-                        onRevealEntry: { entry in
-                            NSWorkspace.shared.activateFileViewerSelecting([entry.url])
-                        },
-                        onRefreshFiles: {
-                            volumeBrowserStore.load(volume: selectedVolume, relativePath: volumeBrowserStore.snapshot?.relativePath ?? "")
-                        },
-                        onExport: {
-                            exportVolume(selectedVolume)
-                        },
-                        onImport: {
-                            importIntoVolume(selectedVolume)
-                        },
-                        onClone: {
-                            showCloneSheet(for: selectedVolume)
-                        },
-                        onEmpty: {
-                            pendingEmpty = selectedVolume
+                        ) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                VolumeOverviewTabView(volume: selectedVolume)
+                                VolumeMetadataTabView(volume: selectedVolume)
+                            }
                         }
-                    )
+                    }
                 }
             }
         }
@@ -95,7 +189,7 @@ struct VolumesView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将删除存储卷 \(pendingDelete?.name ?? "所选卷")。被容器引用的卷无法删除。")
+            Text(deleteAlertMessage)
         }
         .alert(language.resolved == .zhHans ? "清空存储卷？" : "Empty volume?", isPresented: Binding(
             get: { pendingEmpty != nil },
@@ -167,6 +261,8 @@ struct VolumesView: View {
                         createVolumeForm
                     }
 
+                    refreshButton
+
                     Button {
                         isConfirmingPrune = true
                     } label: {
@@ -194,6 +290,26 @@ struct VolumesView: View {
             }
 
             ResourceToolbar(searchText: $searchText, placeholder: language.t(.search)) {
+                Picker("", selection: $kindFilter) {
+                    ForEach(VolumeKindFilter.allCases) { option in
+                        Text(option.title(language: language)).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 118)
+                .help(language.resolved == .zhHans ? "按卷类型过滤" : "Filter by volume type")
+
+                Picker("", selection: $sortOption) {
+                    ForEach(VolumeSortOption.allCases) { option in
+                        Text(option.title(language: language)).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 118)
+                .help(language.resolved == .zhHans ? "排序卷列表" : "Sort volumes")
+
                 Text(language.itemCount(filteredVolumes.count))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -203,7 +319,7 @@ struct VolumesView: View {
                 ResourceTable {
                     volumeHeader
                 } rows: {
-                    EmptyStateView(title: language.t(.noVolumes), message: "创建命名卷后可在容器中挂载使用。", systemImage: "externaldrive")
+                    volumeEmptyState
                         .padding(18)
                 }
             } else {
@@ -211,37 +327,17 @@ struct VolumesView: View {
                     volumeHeader
                 } rows: {
                     ForEach(filteredVolumes) { volume in
-                        ResourceTableRow(isSelected: selectedName == volume.name) {
+                        ResourceTableRow(isSelected: selectedName == volume.name || detailName == volume.name) {
                             let deleteKey = RuntimeOperationKey.volumeDelete(volume.name)
                             let isOperationBlocked = runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning
-                            ResourceStatusDot(tint: volume.isAnonymous ? .orange : CDTheme.lime, isHollow: volume.isAnonymous)
-
-                            Text(volume.name)
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            StatusPill(title: volume.typeText, systemImage: "tag", tint: volume.isAnonymous ? .orange : CDTheme.lime)
-                                .frame(width: 112, alignment: .leading)
-
-                            Text(volume.driver)
-                                .lineLimit(1)
-                                .frame(width: 92, alignment: .leading)
-
-                            Text(volume.createdText)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 140, alignment: .leading)
-
-                            Text(volume.sizeDisplay)
-                                .font(.callout.monospacedDigit())
-                                .frame(width: 90, alignment: .trailing)
+                            volumeRowMainButton(volume)
 
                             HStack(spacing: 8) {
                                 RowActionButton(
                                     systemImage: "folder",
-                                    help: language.resolved == .zhHans ? "打开卷源目录" : "Open volume source"
+                                    help: language.resolved == .zhHans ? "打开本地卷文件夹" : "Open local volume folder"
                                 ) {
-                                    openVolumeSource(volume)
+                                    openVolumeLocalFolder(volume)
                                 }
                                 RowActionButton(
                                     systemImage: "plus.square.on.square",
@@ -285,15 +381,141 @@ struct VolumesView: View {
             .help(language.resolved == .zhHans ? "清理未使用卷" : "Prune unused volumes")
             Button("取消", role: .cancel) {}
         } message: {
-            Text(language.resolved == .zhHans ? "将删除没有容器引用的存储卷。" : "This removes volumes that are not referenced by containers.")
+            Text(pruneReferenceHint)
+        }
+    }
+
+    private func volumeRowMainButton(_ volume: VolumeSummary) -> some View {
+        Button {
+            openVolumeDetail(volume)
+        } label: {
+            HStack(spacing: 12) {
+                ResourceStatusDot(tint: volume.isAnonymous ? .orange : CDTheme.lime, isHollow: volume.isAnonymous)
+
+                Text(volume.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                StatusPill(title: volume.typeText, systemImage: "tag", tint: volume.isAnonymous ? .orange : CDTheme.lime)
+                    .frame(width: 112, alignment: .leading)
+
+                Text(volume.driver)
+                    .lineLimit(1)
+                    .frame(width: 92, alignment: .leading)
+
+                Text(volume.createdText)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 140, alignment: .leading)
+
+                Text(volume.sizeDisplay)
+                    .font(.callout.monospacedDigit())
+                    .frame(width: 90, alignment: .trailing)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(language.resolved == .zhHans ? "打开卷详情" : "Open volume details")
+    }
+
+    private var deleteAlertMessage: String {
+        guard let pendingDelete else {
+            return language.resolved == .zhHans ? "将删除所选卷。" : "This deletes the selected volume."
+        }
+        let prefix = language.resolved == .zhHans
+            ? "将删除存储卷 \(pendingDelete.name)。"
+            : "This deletes volume \(pendingDelete.name)."
+        return "\(prefix)\n\(deleteReferenceHint(for: pendingDelete))"
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await runtimeStore.refreshAll() }
+        } label: {
+            if runtimeStore.isRefreshing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(language.resolved == .zhHans ? "刷新中" : "Refreshing")
+                }
+            } else {
+                Label(language.t(.refresh), systemImage: "arrow.clockwise")
+            }
+        }
+        .disabled(runtimeStore.isRefreshing)
+        .help(language.resolved == .zhHans ? "刷新卷列表" : "Refresh volume list")
+    }
+
+    private var volumeEmptyState: some View {
+        VStack(spacing: 12) {
+            EmptyStateView(
+                title: language.t(.noVolumes),
+                message: language.resolved == .zhHans
+                    ? "创建命名卷后可在容器中挂载使用，也可以先生成一组示例卷测试列表、详情和文件浏览。"
+                    : "Create named volumes for containers, or generate demo volumes to test the list, details, and file browser.",
+                systemImage: "externaldrive"
+            )
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await runtimeStore.createDemoVolumes() }
+                } label: {
+                    if runtimeStore.isVolumeOperationRunning {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(language.resolved == .zhHans ? "创建示例中" : "Creating Demo")
+                        }
+                    } else {
+                        Label(language.resolved == .zhHans ? "创建示例卷" : "Create Demo Volumes", systemImage: "sparkles")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning)
+                .help(language.resolved == .zhHans ? "创建 cd-demo-* 示例卷" : "Create cd-demo-* sample volumes")
+
+                Button {
+                    copyToPasteboard(demoVolumeCommand)
+                    runtimeStore.volumeStatusMessage = language.resolved == .zhHans
+                        ? "已复制示例卷命令。"
+                        : "Demo volume commands copied."
+                    runtimeStore.volumeStatusIsError = false
+                } label: {
+                    Label(language.resolved == .zhHans ? "复制测试命令" : "Copy Test Commands", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .help(language.resolved == .zhHans ? "复制创建和清理示例卷的命令" : "Copy commands for creating and cleaning demo volumes")
+            }
         }
     }
 
     private func selectVolume(_ volume: VolumeSummary) {
+        detailName = nil
         selectedName = volume.name
         drawerMode = .overview
-        volumeBrowserStore.load(volume: volume)
         Task { await runtimeStore.inspectVolume(volume.name) }
+    }
+
+    private func openVolumeDetail(_ volume: VolumeSummary, selectedTab: VolumeDetailTab = .overview) {
+        selectedName = nil
+        detailInitialTab = selectedTab
+        detailName = volume.name
+    }
+
+    private func openVolumeLocalFolder(_ volume: VolumeSummary) {
+        let source = volume.source.trimmed
+        guard !source.isEmpty else { return }
+
+        let sourceURL = URL(fileURLWithPath: source).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            NSWorkspace.shared.open(sourceURL)
+            return
+        }
+
+        let folderURL = sourceURL.deletingLastPathComponent()
+        guard folderURL.path != sourceURL.path else { return }
+        NSWorkspace.shared.open(folderURL)
     }
 
     private var createVolumeForm: some View {
@@ -359,29 +581,6 @@ struct VolumesView: View {
         }
     }
 
-    private func openVolumeSource(_ volume: VolumeSummary) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: volume.source)])
-    }
-
-    private func exportVolume(_ volume: VolumeSummary) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "\(volume.name).tar"
-        panel.allowedContentTypes = [.data]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await volumeBrowserStore.export(volume: volume, outputPath: url.path) }
-    }
-
-    private func importIntoVolume(_ volume: VolumeSummary) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.data]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await volumeBrowserStore.importArchive(volume: volume, archivePath: url.path) }
-    }
-
     private func showCloneSheet(for volume: VolumeSummary) {
         cloneVolumeName = suggestedCloneName(for: volume.name)
         cloneVolumeSize = ""
@@ -399,12 +598,7 @@ struct VolumesView: View {
     }
 
     private func emptyVolume(_ volume: VolumeSummary) {
-        Task {
-            await runtimeStore.emptyVolume(volume)
-            if selectedName == volume.name {
-                volumeBrowserStore.load(volume: volume, relativePath: volumeBrowserStore.snapshot?.relativePath ?? "")
-            }
-        }
+        Task { await runtimeStore.emptyVolume(volume) }
     }
 
     private func lines(from text: String) -> [String] {
@@ -413,303 +607,9 @@ struct VolumesView: View {
             .map { String($0).trimmed }
             .filter { !$0.isEmpty }
     }
-}
 
-private struct VolumeDetailOverview: View {
-    @Environment(\.appLanguage) private var language
-    var volume: VolumeSummary
-    @Bindable var browserStore: VolumeBrowserStore
-    var onOpenEntry: (VolumeFileEntry) -> Void
-    var onRevealEntry: (VolumeFileEntry) -> Void
-    var onRefreshFiles: () -> Void
-    var onExport: () -> Void
-    var onImport: () -> Void
-    var onClone: () -> Void
-    var onEmpty: () -> Void
-    @State private var showCreateFolderPopover = false
-    @State private var newFolderName = ""
-    @State private var renameEntry: VolumeFileEntry?
-    @State private var renameEntryName = ""
-    @State private var pendingDeleteEntry: VolumeFileEntry?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            DetailSection(title: language.resolved == .zhHans ? "存储卷" : "Volume") {
-                DetailInfoCard {
-                    DetailInfoRow(title: language.t(.name), value: volume.name)
-                    DetailInfoRow(title: language.t(.type), value: volume.typeText)
-                    DetailInfoRow(title: language.t(.driver), value: volume.driver)
-                    DetailInfoRow(title: "Format", value: volume.format)
-                    DetailInfoRow(title: language.t(.source), value: volume.source)
-                    DetailInfoRow(title: language.t(.created), value: volume.createdText)
-                    DetailInfoRow(title: language.t(.size), value: volume.sizeDisplay)
-                }
-            }
-
-            DetailSection(title: "Metadata") {
-                DetailInfoCard {
-                    if volume.configuration.labels.isEmpty && volume.configuration.options.isEmpty {
-                        Text(language.resolved == .zhHans ? "没有标签或驱动选项。" : "No labels or driver options.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(volume.configuration.labels.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                            DetailInfoRow(title: key, value: value)
-                        }
-                        ForEach(volume.configuration.options.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                            DetailInfoRow(title: key, value: value)
-                        }
-                    }
-                }
-            }
-
-            DetailSection(title: language.resolved == .zhHans ? "文件" : "Files") {
-                DetailInfoCard {
-                    volumeFileToolbar
-
-                    if let statusMessage = browserStore.statusMessage {
-                        StatusBanner(
-                            text: statusMessage,
-                            systemImage: browserStore.isError ? "exclamationmark.triangle" : "checkmark.circle",
-                            tint: browserStore.isError ? CDTheme.ember : CDTheme.lime
-                        )
-                    }
-
-                    if browserStore.isLoading {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(language.resolved == .zhHans ? "正在读取卷目录..." : "Reading volume directory...")
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if let snapshot = browserStore.snapshot {
-                        if snapshot.entries.isEmpty {
-                            Text(language.resolved == .zhHans ? "目录为空。" : "Directory is empty.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(spacing: 0) {
-                                ForEach(snapshot.entries.prefix(80)) { entry in
-                                    VolumeFileRow(
-                                        entry: entry,
-                                        onOpen: { onOpenEntry(entry) },
-                                        onReveal: { onRevealEntry(entry) },
-                                        onRename: {
-                                            renameEntryName = entry.name
-                                            renameEntry = entry
-                                        },
-                                        onDelete: {
-                                            pendingDeleteEntry = entry
-                                        }
-                                    )
-                                    Divider()
-                                }
-                            }
-                            if snapshot.entries.count > 80 {
-                                Text(language.resolved == .zhHans ? "仅显示前 80 项，缩小目录后继续浏览。" : "Showing the first 80 items. Narrow the directory to inspect more.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
-                        Text(language.resolved == .zhHans ? "无法读取卷目录。" : "Unable to read volume directory.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .alert(language.resolved == .zhHans ? "删除文件项？" : "Delete entry?", isPresented: Binding(
-            get: { pendingDeleteEntry != nil },
-            set: { if !$0 { pendingDeleteEntry = nil } }
-        )) {
-            if let entry = pendingDeleteEntry {
-                Button(language.resolved == .zhHans ? "删除" : "Delete", role: .destructive) {
-                    pendingDeleteEntry = nil
-                    Task { await browserStore.deleteEntry(volume: volume, entry: entry) }
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(language.resolved == .zhHans ? "将删除 \(pendingDeleteEntry?.name ?? "该项")。" : "This will delete \(pendingDeleteEntry?.name ?? "the selected entry").")
-        }
-        .sheet(item: $renameEntry) { entry in
-            renameSheet(entry: entry)
-        }
-        .sheet(isPresented: $showCreateFolderPopover) {
-            createFolderForm
-        }
-    }
-
-    private var volumeFileToolbar: some View {
-        HStack(spacing: 8) {
-            Text(browserStore.snapshot?.displayPath ?? "/")
-                .font(.caption.monospaced())
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 6))
-
-            Spacer()
-
-            Button {
-                showCreateFolderPopover = true
-            } label: {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(CDTheme.dockerBlue)
-                    .frame(width: 28, height: 28)
-                    .background(CDTheme.dockerBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .disabled(browserStore.isLoading || browserStore.isImportExportRunning || browserStore.isFileOperationRunning)
-            .help(language.resolved == .zhHans ? "新建目录" : "Create folder")
-
-            RowActionButton(
-                systemImage: "arrow.up",
-                help: language.resolved == .zhHans ? "返回上一级" : "Go to parent folder"
-            ) {
-                browserStore.goUp()
-            }
-            RowActionButton(
-                systemImage: "arrow.clockwise",
-                help: language.t(.refresh)
-            ) {
-                onRefreshFiles()
-            }
-            RowActionButton(
-                systemImage: "plus.square.on.square",
-                help: language.resolved == .zhHans ? "克隆卷" : "Clone volume"
-            ) {
-                onClone()
-            }
-            DestructiveRowActionButton(
-                systemImage: "eraser",
-                help: language.resolved == .zhHans ? "清空卷" : "Empty volume"
-            ) {
-                onEmpty()
-            }
-            RowActionButton(
-                systemImage: "square.and.arrow.up",
-                help: language.resolved == .zhHans ? "导出文件" : "Export files"
-            ) {
-                onExport()
-            }
-            RowActionButton(
-                systemImage: "square.and.arrow.down",
-                help: language.resolved == .zhHans ? "导入文件" : "Import files"
-            ) {
-                onImport()
-            }
-        }
-    }
-
-    private var createFolderForm: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(language.resolved == .zhHans ? "新建目录" : "Create Folder")
-                .font(.headline)
-            TextField(language.resolved == .zhHans ? "目录名称" : "Folder name", text: $newFolderName)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 280)
-            HStack {
-                Spacer()
-                Button("取消") {
-                    showCreateFolderPopover = false
-                }
-                .help(language.resolved == .zhHans ? "取消新建目录" : "Cancel creating folder")
-                Button(language.t(.create)) {
-                    let name = newFolderName
-                    newFolderName = ""
-                    showCreateFolderPopover = false
-                    Task { await browserStore.createDirectory(volume: volume, name: name) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(newFolderName.trimmed.isEmpty || browserStore.isFileOperationRunning)
-                .help(language.resolved == .zhHans ? "创建目录" : "Create folder")
-            }
-        }
-        .padding(16)
-    }
-
-    private func renameSheet(entry: VolumeFileEntry) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(language.resolved == .zhHans ? "重命名" : "Rename")
-                .font(.headline)
-            Text(entry.name)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-            TextField(language.resolved == .zhHans ? "新名称" : "New name", text: $renameEntryName)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 280)
-            HStack {
-                Spacer()
-                Button("取消") {
-                    renameEntry = nil
-                }
-                .help(language.resolved == .zhHans ? "取消重命名" : "Cancel rename")
-                Button(language.t(.save)) {
-                    let newName = renameEntryName
-                    renameEntry = nil
-                    Task { await browserStore.renameEntry(volume: volume, entry: entry, newName: newName) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(renameEntryName.trimmed.isEmpty || browserStore.isFileOperationRunning)
-                .help(language.resolved == .zhHans ? "保存新名称" : "Save new name")
-            }
-        }
-        .padding(16)
-    }
-}
-
-private struct VolumeFileRow: View {
-    @Environment(\.appLanguage) private var language
-    var entry: VolumeFileEntry
-    var onOpen: () -> Void
-    var onReveal: () -> Void
-    var onRename: () -> Void
-    var onDelete: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Button(action: onOpen) {
-                HStack(spacing: 8) {
-                    Image(systemName: entry.systemImage)
-                        .foregroundStyle(entry.isDirectory ? CDTheme.dockerBlue : .secondary)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.name)
-                            .font(.callout.weight(.medium))
-                            .lineLimit(1)
-                        Text("\(entry.sizeDisplay) · \(entry.modifiedText)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(entry.isDirectory
-                ? (language.resolved == .zhHans ? "打开目录" : "Open folder")
-                : (language.resolved == .zhHans ? "查看文件" : "View file"))
-
-            RowActionButton(
-                systemImage: "folder",
-                help: language.resolved == .zhHans ? "在访达中显示" : "Reveal in Finder"
-            ) {
-                onReveal()
-            }
-            RowActionButton(
-                systemImage: "pencil",
-                help: language.resolved == .zhHans ? "重命名" : "Rename"
-            ) {
-                onRename()
-            }
-            DestructiveRowActionButton(
-                help: language.resolved == .zhHans ? "删除文件或目录" : "Delete file or folder"
-            ) {
-                onDelete()
-            }
-        }
-        .padding(.vertical, 7)
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }

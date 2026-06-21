@@ -65,6 +65,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
         private var didSeedSnapshot = false
         private(set) var terminalColumns = 0
         private(set) var terminalRows = 0
+        private var pendingSnapshotReplay: PendingSnapshotReplay?
 
         init(onInput: @escaping (Data) -> Void, onSizeChange: @escaping (Int, Int) -> Void) {
             self.onInput = onInput
@@ -86,7 +87,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
             resetSequence: Int
         ) {
             if lastResetSequence != resetSequence {
-                reset(
+                requestResetOrReplay(
                     terminalView,
                     textSnapshot: textSnapshot,
                     outputSequence: outputSequence,
@@ -96,7 +97,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
             }
 
             guard didSeedSnapshot else {
-                reset(
+                requestResetOrReplay(
                     terminalView,
                     textSnapshot: textSnapshot,
                     outputSequence: outputSequence,
@@ -127,6 +128,11 @@ struct SwiftTermTerminalView: NSViewRepresentable {
 
         private(set) var resetCount = 0
         private(set) var skippedOutputGapCount = 0
+        private(set) var pendingReplayCount = 0
+
+        var isSnapshotReplayPending: Bool {
+            pendingSnapshotReplay != nil
+        }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             guard newCols > 0, newRows > 0 else { return }
@@ -134,6 +140,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
             terminalColumns = newCols
             terminalRows = newRows
             onSizeChange(newCols, newRows)
+            flushPendingSnapshotReplayIfPossible(source)
         }
 
         func setTerminalTitle(source: TerminalView, title: String) {}
@@ -166,21 +173,78 @@ struct SwiftTermTerminalView: NSViewRepresentable {
 
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 
-        @MainActor
-        private func reset(
+        private func requestResetOrReplay(
+            _ terminalView: TerminalView,
+            textSnapshot: String,
+            outputSequence: Int,
+            resetSequence: Int
+        ) {
+            guard !shouldDelaySnapshotReplay(textSnapshot: textSnapshot) else {
+                if pendingSnapshotReplay == nil {
+                    pendingReplayCount += 1
+                }
+                pendingSnapshotReplay = PendingSnapshotReplay(
+                    textSnapshot: textSnapshot,
+                    outputSequence: outputSequence,
+                    resetSequence: resetSequence
+                )
+                return
+            }
+            pendingSnapshotReplay = nil
+            performResetReplay(
+                terminalView,
+                textSnapshot: textSnapshot,
+                outputSequence: outputSequence,
+                resetSequence: resetSequence
+            )
+        }
+
+        private func flushPendingSnapshotReplayIfPossible(_ terminalView: TerminalView) {
+            guard hasValidSnapshotReplaySize else { return }
+            guard let pendingSnapshotReplay else { return }
+            self.pendingSnapshotReplay = nil
+            performResetReplay(
+                terminalView,
+                textSnapshot: pendingSnapshotReplay.textSnapshot,
+                outputSequence: pendingSnapshotReplay.outputSequence,
+                resetSequence: pendingSnapshotReplay.resetSequence
+            )
+        }
+
+        private func shouldDelaySnapshotReplay(textSnapshot: String) -> Bool {
+            !textSnapshot.isEmpty && !hasValidSnapshotReplaySize
+        }
+
+        private var hasValidSnapshotReplaySize: Bool {
+            terminalColumns >= Self.minimumSnapshotReplayColumns
+                && terminalRows >= Self.minimumSnapshotReplayRows
+        }
+
+        private func performResetReplay(
             _ terminalView: TerminalView,
             textSnapshot: String,
             outputSequence: Int,
             resetSequence: Int
         ) {
             resetCount += 1
-            terminalView.feed(text: "\u{1B}[2J\u{1B}[3J\u{1B}[H")
-            if !textSnapshot.isEmpty {
-                terminalView.feed(text: textSnapshot)
+            MainActor.assumeIsolated {
+                terminalView.feed(text: "\u{1B}[2J\u{1B}[3J\u{1B}[H")
+                if !textSnapshot.isEmpty {
+                    terminalView.feed(text: textSnapshot)
+                }
             }
             lastOutputSequence = outputSequence
             lastResetSequence = resetSequence
             didSeedSnapshot = true
+        }
+
+        private static let minimumSnapshotReplayColumns = 20
+        private static let minimumSnapshotReplayRows = 4
+
+        private struct PendingSnapshotReplay {
+            var textSnapshot: String
+            var outputSequence: Int
+            var resetSequence: Int
         }
     }
 }
@@ -231,6 +295,15 @@ final class FocusableTerminalView: TerminalView {
             return
         }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if inputEnabled,
+           let bytes = TerminalControlKeyMapper.controlBytes(for: event) {
+            send(bytes)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

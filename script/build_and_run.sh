@@ -44,6 +44,12 @@ chmod +x "$APP_BINARY"
 if [[ -f "$ICON_SOURCE" ]]; then
   cp "$ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
 fi
+for locale in en.lproj zh-Hans.lproj; do
+  if [[ -f "$ROOT_DIR/Resources/$locale/ServicesMenu.strings" ]]; then
+    mkdir -p "$APP_RESOURCES/$locale"
+    cp "$ROOT_DIR/Resources/$locale/ServicesMenu.strings" "$APP_RESOURCES/$locale/ServicesMenu.strings"
+  fi
+done
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -76,6 +82,15 @@ cat >"$INFO_PLIST" <<PLIST
       <string>openDockerCompatibilityTerminal</string>
       <key>NSPortName</key>
       <string>$APP_NAME</string>
+      <key>NSRequiredContext</key>
+      <dict>
+        <key>NSApplicationIdentifier</key>
+        <string>com.apple.finder</string>
+      </dict>
+      <key>NSSendFileTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
       <key>NSSendTypes</key>
       <array>
         <string>NSFilenamesPboardType</string>
@@ -125,9 +140,28 @@ cat >"$TERMINAL_INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+register_launch_services() {
+  local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  if [[ -x "$lsregister" ]]; then
+    "$lsregister" -f "$APP_BUNDLE" >/dev/null 2>&1 || true
+  fi
+}
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }
+
+wait_for_app() {
+  for _ in {1..20}; do
+    if pgrep -x "$APP_NAME" >/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  pgrep -x "$APP_NAME" >/dev/null
+}
+
+register_launch_services
 
 case "$MODE" in
   run)
@@ -146,8 +180,7 @@ case "$MODE" in
     ;;
   --verify|verify)
     open_app
-    sleep 1
-    pgrep -x "$APP_NAME" >/dev/null
+    wait_for_app
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2

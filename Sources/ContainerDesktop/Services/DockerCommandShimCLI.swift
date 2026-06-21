@@ -22,6 +22,10 @@ enum DockerCommandShimCLI {
             exit(125)
         }
 
+        postComposeProjectAutoRegistrationIfNeeded(
+            executable: executable,
+            arguments: dockerArguments
+        )
         writeVerboseConversionIfNeeded(result, originalExecutable: executable, originalArguments: dockerArguments)
 
         if result.commands.count == 1, let command = result.commands.first {
@@ -35,6 +39,36 @@ enum DockerCommandShimCLI {
     private static var isVerbose: Bool {
         let value = ProcessInfo.processInfo.environment[verboseEnvironmentKey] ?? ""
         return value == "1" || value.lowercased() == "true"
+    }
+
+    static func composeProjectRegistrationRequest(
+        executable: String,
+        arguments: [String],
+        workingDirectory: URL
+    ) -> DockerComposeProjectRegistrationRequest? {
+        DockerComposeProjectRegistrationRequest.make(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory
+        )
+    }
+
+    private static func postComposeProjectAutoRegistrationIfNeeded(
+        executable: String,
+        arguments: [String]
+    ) {
+        let workingDirectory = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        )
+        guard let request = composeProjectRegistrationRequest(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory
+        ) else {
+            return
+        }
+        ComposeProjectAutoRegistrationNotification.post(request)
     }
 
     private static func writeFailure(_ result: DockerCommandConversionResult) {

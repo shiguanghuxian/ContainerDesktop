@@ -5,10 +5,12 @@ import Observation
 @Observable
 final class DockerCompatibilityTerminalStore {
     private let service: DockerCompatibilityTerminalService
+    private let historyDefaults: UserDefaults
     private let maxTerminalCharacters = 180_000
-    private let maxTerminalOutputEvents = 4_000
     private let terminalOutputFlushDelayNanoseconds: UInt64 = 16_000_000
+    let openRequest: DockerCompatibilityTerminalOpenRequest
     let workingDirectory: URL
+    let shellTarget: TerminalShellTarget?
 
     var terminalText = ""
     var terminalOutputEvents: [TerminalOutputEvent] = []
@@ -26,10 +28,31 @@ final class DockerCompatibilityTerminalStore {
 
     init(
         service: DockerCompatibilityTerminalService = DockerCompatibilityTerminalService(),
-        workingDirectory: URL = AppPaths.homeDirectory
+        historyDefaults: UserDefaults = .containerDesktopShared,
+        workingDirectory: URL = AppPaths.homeDirectory,
+        shellTarget: TerminalShellTarget? = nil
     ) {
         self.service = service
-        self.workingDirectory = workingDirectory
+        self.historyDefaults = historyDefaults
+        let request = DockerCompatibilityTerminalOpenRequest(
+            workingDirectory: workingDirectory,
+            shellTarget: shellTarget
+        )
+        openRequest = request
+        self.workingDirectory = request.workingDirectory
+        self.shellTarget = request.shellTarget
+    }
+
+    init(
+        service: DockerCompatibilityTerminalService = DockerCompatibilityTerminalService(),
+        historyDefaults: UserDefaults = .containerDesktopShared,
+        openRequest: DockerCompatibilityTerminalOpenRequest
+    ) {
+        self.service = service
+        self.historyDefaults = historyDefaults
+        self.openRequest = openRequest
+        workingDirectory = openRequest.workingDirectory
+        shellTarget = openRequest.shellTarget
     }
 
     var shimPathText: String {
@@ -50,7 +73,7 @@ final class DockerCompatibilityTerminalStore {
         do {
             let prepared = try service.makeSession(
                 verboseConversions: verboseConversions,
-                workingDirectory: workingDirectory
+                request: openRequest
             )
             lastEnvironment = prepared.environment
             terminalSession = prepared.session
@@ -151,6 +174,7 @@ final class DockerCompatibilityTerminalStore {
         terminalText.append(chunk)
         terminalOutputSequence &+= 1
         terminalOutputEvents.append(TerminalOutputEvent(sequence: terminalOutputSequence, text: chunk))
+        let maxTerminalOutputEvents = DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: historyDefaults)
         if terminalOutputEvents.count > maxTerminalOutputEvents {
             terminalOutputEvents.removeFirst(terminalOutputEvents.count - maxTerminalOutputEvents)
         }

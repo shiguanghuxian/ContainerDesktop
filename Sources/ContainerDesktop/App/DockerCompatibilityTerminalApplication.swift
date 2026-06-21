@@ -3,12 +3,30 @@ import SwiftUI
 
 struct DockerCompatibilityTerminalLaunchOptions: Equatable {
     var workingDirectory: URL
+    var shellTarget: TerminalShellTarget?
+
+    init(
+        workingDirectory: URL,
+        shellTarget: TerminalShellTarget? = nil
+    ) {
+        self.workingDirectory = workingDirectory.standardizedFileURL
+        self.shellTarget = shellTarget
+    }
+
+    var openRequest: DockerCompatibilityTerminalOpenRequest {
+        DockerCompatibilityTerminalOpenRequest(
+            workingDirectory: workingDirectory,
+            shellTarget: shellTarget
+        )
+    }
 }
 
 @MainActor
 enum DockerCompatibilityTerminalApplication {
     static let argumentFlag = "--docker-compatibility-terminal-app"
     static let workingDirectoryFlag = "--working-directory"
+    static let shellTargetKindFlag = "--shell-target-kind"
+    static let shellTargetIDFlag = "--shell-target-id"
     static let bundleIdentifier = "\(AppPaths.bundleIdentifier).DockerCompatibilityTerminal"
     static let executableName = "DockerCompatibilityTerminal"
 
@@ -61,6 +79,8 @@ enum DockerCompatibilityTerminalApplication {
         }
 
         var workingDirectory = AppPaths.homeDirectory
+        var shellTargetKind: String?
+        var shellTargetID: String?
         var index = startIndex
         while index < arguments.count {
             let argument = arguments[index]
@@ -73,6 +93,22 @@ enum DockerCompatibilityTerminalApplication {
                 index += 2
                 continue
             }
+            if argument == shellTargetKindFlag {
+                let valueIndex = index + 1
+                if valueIndex < arguments.count {
+                    shellTargetKind = arguments[valueIndex]
+                }
+                index += 2
+                continue
+            }
+            if argument == shellTargetIDFlag {
+                let valueIndex = index + 1
+                if valueIndex < arguments.count {
+                    shellTargetID = arguments[valueIndex]
+                }
+                index += 2
+                continue
+            }
 
             if !argument.hasPrefix("-"),
                let directory = DockerCompatibilityTerminalServiceRequest.workingDirectory(fromPath: argument) {
@@ -81,7 +117,10 @@ enum DockerCompatibilityTerminalApplication {
             index += 1
         }
 
-        return DockerCompatibilityTerminalLaunchOptions(workingDirectory: workingDirectory)
+        return DockerCompatibilityTerminalLaunchOptions(
+            workingDirectory: workingDirectory,
+            shellTarget: TerminalShellTarget(kindRawValue: shellTargetKind, id: shellTargetID)
+        )
     }
 
     private static func isStandaloneLaunch(arguments: [String]) -> Bool {
@@ -92,6 +131,22 @@ enum DockerCompatibilityTerminalApplication {
             return false
         }
         return URL(fileURLWithPath: executablePath).lastPathComponent == executableName
+    }
+
+    static func launchArguments(for request: DockerCompatibilityTerminalOpenRequest) -> [String] {
+        var arguments = [
+            workingDirectoryFlag,
+            request.workingDirectory.path,
+        ]
+        if let shellTarget = request.shellTarget {
+            arguments.append(contentsOf: [
+                shellTargetKindFlag,
+                shellTarget.kind.rawValue,
+                shellTargetIDFlag,
+                shellTarget.resourceID,
+            ])
+        }
+        return arguments
     }
 }
 
@@ -119,6 +174,10 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         return AppLanguage(rawValue: rawValue) ?? .system
     }
 
+    private var terminalStyle: DockerCompatibilityTerminalStyle {
+        DockerCompatibilityTerminalStyle.stored()
+    }
+
     init(options: DockerCompatibilityTerminalLaunchOptions) {
         launchOptions = options
     }
@@ -132,19 +191,34 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         lastChromePreferences = currentChromePreferences
         observeUserDefaults()
         observeOpenWorkingDirectoryRequests()
-        openTerminalWindow(workingDirectory: launchOptions.workingDirectory)
+        openTerminalWindow(request: launchOptions.openRequest)
         NSUpdateDynamicServices()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard flag == false else { return false }
+        if let window {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        } else {
+            openTerminalWindow(request: launchOptions.openRequest)
+        }
+        return false
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let workingDirectory = urls.compactMap(DockerCompatibilityTerminalServiceRequest.workingDirectory(fromFileURL:)).first else {
             return
         }
-        openTerminalWindow(workingDirectory: workingDirectory, addTabIfWindowExists: true)
+        openTerminalWindow(
+            request: DockerCompatibilityTerminalOpenRequest(workingDirectory: workingDirectory),
+            addTabIfWindowExists: true
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -169,6 +243,12 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         window = nil
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === window else { return true }
+        sender.orderOut(nil)
+        return false
+    }
+
     @objc func openDockerCompatibilityTerminal(
         _ pasteboard: NSPasteboard,
         userData: String,
@@ -178,7 +258,10 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
             error.pointee = DockerCompatibilityTerminalStrings.invalidServiceSelection(language) as NSString
             return
         }
-        openTerminalWindow(workingDirectory: workingDirectory, addTabIfWindowExists: true)
+        openTerminalWindow(
+            request: DockerCompatibilityTerminalOpenRequest(workingDirectory: workingDirectory),
+            addTabIfWindowExists: true
+        )
     }
 
     private func observeUserDefaults() {
@@ -199,20 +282,16 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            let path = notification.userInfo?[DockerCompatibilityTerminalEmbeddedApp.workingDirectoryUserInfoKey] as? String
-            Task { @MainActor [weak self, path] in
-                guard let path,
-                      let workingDirectory = DockerCompatibilityTerminalServiceRequest.workingDirectory(fromPath: path)
-                else {
-                    return
-                }
-                self?.openTerminalWindow(workingDirectory: workingDirectory, addTabIfWindowExists: true)
+            let request = DockerCompatibilityTerminalEmbeddedApp.openRequest(from: notification.userInfo)
+            Task { @MainActor [weak self, request] in
+                guard let request else { return }
+                self?.openTerminalWindow(request: request, addTabIfWindowExists: true)
             }
         }
     }
 
     private var currentChromePreferences: DockerCompatibilityTerminalChromePreferences {
-        DockerCompatibilityTerminalChromePreferences(language: language, appearance: appearance)
+        DockerCompatibilityTerminalChromePreferences(language: language, appearance: appearance, terminalStyle: terminalStyle)
     }
 
     private func refreshChromeIfNeeded() {
@@ -223,14 +302,17 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         refreshWindow()
     }
 
-    private func openTerminalWindow(workingDirectory: URL, addTabIfWindowExists: Bool = false) {
+    private func openTerminalWindow(
+        request: DockerCompatibilityTerminalOpenRequest,
+        addTabIfWindowExists: Bool = false
+    ) {
         if let window {
             if let tabsStore {
-                if addTabIfWindowExists || tabsStore.tabs.isEmpty {
-                    tabsStore.newTab(workingDirectory: workingDirectory)
+                if addTabIfWindowExists || request.shellTarget != nil || tabsStore.tabs.isEmpty {
+                    tabsStore.newTab(request: request)
                 }
             } else {
-                let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: workingDirectory)
+                let tabsStore = DockerCompatibilityTerminalTabsStore(initialRequest: request)
                 self.tabsStore = tabsStore
                 hostingController?.rootView = rootView(tabsStore: tabsStore)
             }
@@ -241,7 +323,7 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
             return
         }
 
-        let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: workingDirectory)
+        let tabsStore = DockerCompatibilityTerminalTabsStore(initialRequest: request)
         self.tabsStore = tabsStore
         let hostingController = NSHostingController(rootView: rootView(tabsStore: tabsStore))
         hostingController.sizingOptions = []
@@ -258,7 +340,7 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         self.window = window
         self.hostingController = hostingController
         configureTabKeyCommands(on: window)
-        applyAppearance(to: window)
+        applyTerminalWindowChrome(to: window)
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -270,7 +352,7 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         if let tabsStore {
             hostingController?.rootView = rootView(tabsStore: tabsStore)
         }
-        applyAppearance(to: window)
+        applyTerminalWindowChrome(to: window)
         refreshStyleSettingsWindow()
     }
 
@@ -280,13 +362,10 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
                 tabsStore: tabsStore,
                 onOpenStyleSettings: { [weak self] in
                     self?.openStyleSettingsWindow()
-                },
-                onCloseWindow: { [weak self] in
-                    self?.window?.performClose(nil)
                 }
             )
                 .environment(\.appLanguage, language)
-                .preferredColorScheme(appearance.colorScheme)
+                .preferredColorScheme(DockerCompatibilityTerminalWindowChrome.palette(for: terminalStyle).preferredColorScheme)
         )
     }
 
@@ -303,6 +382,11 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         window.onSelectPreviousTab = { [weak self] in
             self?.selectPreviousDockerCompatibilityTerminalTab(nil)
         }
+        window.onSendInterrupt = { [weak self] in
+            self?.tabsStore?.selectedTab?.store.sendTerminalInputData(
+                Data([TerminalControlKeyMapper.interruptByte])
+            )
+        }
     }
 
     @objc private func newDockerCompatibilityTerminalTab(_ sender: Any?) {
@@ -310,17 +394,15 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
             tabsStore.newTab()
             return
         }
-        openTerminalWindow(workingDirectory: AppPaths.homeDirectory)
+        openTerminalWindow(request: DockerCompatibilityTerminalOpenRequest())
     }
 
     @objc private func closeSelectedDockerCompatibilityTerminalTab(_ sender: Any?) {
         guard let tabsStore else {
-            window?.performClose(sender)
+            openTerminalWindow(request: DockerCompatibilityTerminalOpenRequest())
             return
         }
-        if tabsStore.closeSelectedTab() == .closedLastTab {
-            window?.performClose(sender)
-        }
+        tabsStore.closeSelectedTab()
     }
 
     @objc private func selectNextDockerCompatibilityTerminalTab(_ sender: Any?) {
@@ -348,6 +430,10 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
         case .dark:
             window?.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+
+    private func applyTerminalWindowChrome(to window: NSWindow?) {
+        DockerCompatibilityTerminalWindowChrome.apply(to: window, title: title, style: terminalStyle)
     }
 
     @objc private func openMainApplication(_ sender: NSMenuItem) {
@@ -497,4 +583,5 @@ final class DockerCompatibilityTerminalAppDelegate: NSObject, NSApplicationDeleg
 private struct DockerCompatibilityTerminalChromePreferences: Equatable {
     var language: AppLanguage
     var appearance: AppearancePreference
+    var terminalStyle: DockerCompatibilityTerminalStyle
 }

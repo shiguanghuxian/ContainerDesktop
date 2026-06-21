@@ -1,0 +1,9 @@
+services:
+  web:
+    image: alpine:3.20
+    profiles: ["web"]
+    command: ["sh", "-c", "sleep 3600"]
+  worker:
+    image: alpine:3.20
+    profiles: ["worker"]
+    command: ["sh", "-c", "sleep 3600"]

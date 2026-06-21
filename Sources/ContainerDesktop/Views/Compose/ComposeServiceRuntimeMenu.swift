@@ -4,7 +4,7 @@ struct ComposeServiceRuntimeMenu: View {
     @Environment(\.appLanguage) private var language
     var summary: ComposeServiceRuntimeSummary
     var onOpenContainer: (ContainerSummary) -> Void
-    var onOpenTerminal: (ComposeServiceRuntimeSummary) -> Void
+    var onOpenTerminal: (ComposeServiceRuntimeSummary, ExternalTerminalDestination) -> Void
     var onObserveService: (ComposeServiceRuntimeSummary) -> Void
     var onStartContainers: (ComposeServiceRuntimeSummary) -> Void
     var onStopContainers: (ComposeServiceRuntimeSummary) -> Void
@@ -25,8 +25,10 @@ struct ComposeServiceRuntimeMenu: View {
                 }
             }
 
-            Button {
-                onOpenTerminal(summary)
+            Menu {
+                ExternalTerminalDestinationMenuItems { destination in
+                    onOpenTerminal(summary, destination)
+                }
             } label: {
                 Label(language.resolved == .zhHans ? "打开服务终端" : "Open service terminal", systemImage: "terminal")
             }

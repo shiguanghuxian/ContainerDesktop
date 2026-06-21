@@ -6,6 +6,7 @@ struct ObservabilityView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var composeStore: ComposeProjectStore
+    @Binding var resourceSnapshotRequestID: Int?
     @State private var searchText = ""
     @State private var onlyRunning = true
     @State private var composeScope = ObservabilityComposeScope.all
@@ -120,6 +121,9 @@ struct ObservabilityView: View {
                 refresh()
             }
         }
+        .onAppear {
+            consumeResourceSnapshotRouteRequest()
+        }
         .task(id: autoRefresh) {
             guard autoRefresh else { return }
             while !Task.isCancelled, autoRefresh {
@@ -144,6 +148,9 @@ struct ObservabilityView: View {
         .onChange(of: scopedContainerKey) { _, _ in
             guard showResourceDrawer else { return }
             refreshResourceSnapshot()
+        }
+        .onChange(of: resourceSnapshotRequestID) { _, _ in
+            consumeResourceSnapshotRouteRequest()
         }
     }
 
@@ -183,10 +190,24 @@ struct ObservabilityView: View {
     }
 
     private func toggleResourceDrawer() {
-        showResourceDrawer.toggle()
-        if showResourceDrawer, (resourceSampleScopeKey != scopedContainerKey || visibleResourceSamples.isEmpty) {
+        if showResourceDrawer {
+            closeResourceDrawer()
+        } else {
+            presentResourceDrawer()
+        }
+    }
+
+    private func presentResourceDrawer() {
+        showResourceDrawer = true
+        if resourceSampleScopeKey != scopedContainerKey || visibleResourceSamples.isEmpty {
             refreshResourceSnapshot()
         }
+    }
+
+    private func consumeResourceSnapshotRouteRequest() {
+        guard resourceSnapshotRequestID != nil else { return }
+        resourceSnapshotRequestID = nil
+        presentResourceDrawer()
     }
 
     private func closeResourceDrawer() {

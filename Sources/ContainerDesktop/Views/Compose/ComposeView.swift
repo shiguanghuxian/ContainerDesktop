@@ -73,6 +73,12 @@ struct ComposeView: View {
         activeDrawer == .tasks ? 620 : 430
     }
 
+    private var composeRegistrationHintText: String {
+        language.resolved == .zhHans
+            ? "在普通系统终端创建或启动的 Compose 项目不会自动出现在这里，请点击“添加项目”选择 compose.yaml 或 docker-compose.yml。Docker 兼容终端中的 docker compose 命令会自动登记。"
+            : "Compose projects created or started in a regular system terminal do not appear here automatically. Click Add Project and choose compose.yaml or docker-compose.yml. docker compose commands in the Docker Compatibility Terminal are registered automatically."
+    }
+
     var body: some View {
         Group {
             if let container = detailContainer {
@@ -151,8 +157,20 @@ struct ComposeView: View {
                 onOpenContainer: { container in
                     detailContainerID = container.id
                 },
-                onOpenServiceTerminal: { summary in
-                    openServiceTerminal(summary)
+                browserPortTargets: { container in
+                    runtimeStore.browserPortTargets(for: container)
+                },
+                isBrowserPortTargetsLoading: { container in
+                    runtimeStore.isLoadingBrowserPortTargets(for: container)
+                },
+                browserPortTargetError: { container in
+                    runtimeStore.browserPortTargetError(for: container)
+                },
+                onLoadBrowserPortTargets: { container in
+                    await runtimeStore.loadBrowserPortTargets(for: container)
+                },
+                onOpenServiceTerminal: { summary, destination in
+                    openServiceTerminal(summary, destination: destination)
                 },
                 onObserveProject: { summaries in
                     Task {
@@ -282,6 +300,8 @@ struct ComposeView: View {
                     }
                 }
             }
+
+            StatusBanner(text: composeRegistrationHintText, systemImage: "info.circle", tint: CDTheme.dockerBlue)
 
             ResourceToolbar(searchText: $searchText, placeholder: language.t(.search)) {
                 Text(language.itemCount(filteredProjects.count))
@@ -419,8 +439,8 @@ struct ComposeView: View {
                                     onOpenContainer: { container in
                                         detailContainerID = container.id
                                     },
-                                    onOpenTerminal: { summary in
-                                        openServiceTerminal(summary)
+                                    onOpenTerminal: { summary, destination in
+                                        openServiceTerminal(summary, destination: destination)
                                     },
                                     onObserveService: { summary in
                                         Task { await serviceObservationStore.load(summary: summary) }
@@ -439,6 +459,18 @@ struct ComposeView: View {
                                     },
                                     onStopContainer: { container in
                                         Task { await runtimeStore.stopContainer(container.id) }
+                                    },
+                                    browserPortTargets: { container in
+                                        runtimeStore.browserPortTargets(for: container)
+                                    },
+                                    isBrowserPortTargetsLoading: { container in
+                                        runtimeStore.isLoadingBrowserPortTargets(for: container)
+                                    },
+                                    browserPortTargetError: { container in
+                                        runtimeStore.browserPortTargetError(for: container)
+                                    },
+                                    onLoadBrowserPortTargets: { container in
+                                        await runtimeStore.loadBrowserPortTargets(for: container)
                                     }
                                 )
                                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -639,14 +671,20 @@ struct ComposeView: View {
         }
     }
 
-    private func openServiceTerminal(_ summary: ComposeServiceRuntimeSummary) {
+    private func openServiceTerminal(
+        _ summary: ComposeServiceRuntimeSummary,
+        destination: ExternalTerminalDestination
+    ) {
         guard let container = summary.primaryRunningContainer else {
             runtimeStore.errorMessage = language.resolved == .zhHans ? "服务没有运行中的容器，无法进入终端。" : "The service has no running container."
             return
         }
 
         do {
-            try SystemTerminalLauncher.openContainerShell(id: container.id)
+            try ExternalTerminalLauncher.open(
+                destination: destination,
+                target: .container(id: container.id)
+            )
         } catch {
             runtimeStore.errorMessage = error.localizedDescription
         }
@@ -751,7 +789,11 @@ private struct ComposeProjectOverview: View {
     var lastOutput: String
     var observationStore: ComposeServiceObservationStore
     var onOpenContainer: (ContainerSummary) -> Void
-    var onOpenServiceTerminal: (ComposeServiceRuntimeSummary) -> Void
+    var browserPortTargets: (ContainerSummary) -> [ContainerBrowserPortTarget]
+    var isBrowserPortTargetsLoading: (ContainerSummary) -> Bool
+    var browserPortTargetError: (ContainerSummary) -> String?
+    var onLoadBrowserPortTargets: (ContainerSummary) async -> Void
+    var onOpenServiceTerminal: (ComposeServiceRuntimeSummary, ExternalTerminalDestination) -> Void
     var onObserveProject: ([ComposeServiceRuntimeSummary]) -> Void
     var onObserveService: (ComposeServiceRuntimeSummary) -> Void
     var isComposeAvailable: Bool
@@ -811,6 +853,16 @@ private struct ComposeProjectOverview: View {
                                 }
                                 Spacer()
                                 if let runtime {
+                                    ContainerBrowserPortMenuButton(
+                                        targets: runtime.runningContainers.flatMap { browserPortTargets($0) },
+                                        isLoading: runtime.runningContainers.contains { isBrowserPortTargetsLoading($0) },
+                                        errorMessage: runtime.runningContainers.compactMap { browserPortTargetError($0) }.first
+                                    )
+                                    .task(id: runtime.containerIDsText) {
+                                        for container in runtime.runningContainers {
+                                            await onLoadBrowserPortTargets(container)
+                                        }
+                                    }
                                     ComposeServiceRuntimeMenu(
                                         summary: runtime,
                                         onOpenContainer: onOpenContainer,

@@ -214,22 +214,30 @@ struct ContainersView: View {
                                     Text(container.imageName)
                                         .lineLimit(1)
                                         .frame(width: 180, alignment: .leading)
-
-                                    Text(container.primaryIP)
-                                        .font(.callout.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.82)
-                                        .frame(width: 118, alignment: .leading)
-
-                                    Text(container.state)
-                                        .lineLimit(1)
-                                        .frame(width: 76, alignment: .leading)
                                 }
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                             .help(language.resolved == .zhHans ? "打开容器详情" : "Open container details")
+
+                            HStack(spacing: 6) {
+                                CopyableIPAddressText(value: container.primaryIP)
+                                    .frame(width: 118, alignment: .leading)
+                                ContainerBrowserPortMenuButton(
+                                    targets: runtimeStore.browserPortTargets(for: container),
+                                    isLoading: runtimeStore.isLoadingBrowserPortTargets(for: container),
+                                    errorMessage: runtimeStore.browserPortTargetError(for: container)
+                                )
+                            }
+                            .frame(width: 154, alignment: .leading)
+                            .task(id: "\(container.id)-\(container.state)") {
+                                await runtimeStore.loadBrowserPortTargets(for: container)
+                            }
+
+                            Text(container.state)
+                                .lineLimit(1)
+                                .frame(width: 76, alignment: .leading)
 
                             HStack(spacing: 8) {
                                 let startStopKey = container.state == "running"
@@ -251,12 +259,15 @@ struct ContainersView: View {
                                         }
                                     }
                                 }
-                                RowActionButton(
+                                RowActionMenuButton(
                                     systemImage: "terminal",
                                     tint: container.state == "running" ? CDTheme.dockerBlue : .secondary,
+                                    isDisabled: container.state != "running",
                                     help: language.resolved == .zhHans ? "打开容器终端" : "Open container terminal"
                                 ) {
-                                    openContainerTerminal(container)
+                                    ExternalTerminalDestinationMenuItems { destination in
+                                        openContainerTerminal(container, destination: destination)
+                                    }
                                 }
                                 RowActionButton(
                                     systemImage: "archivebox",
@@ -300,13 +311,19 @@ struct ContainersView: View {
         drawerMode = .overview
     }
 
-    private func openContainerTerminal(_ container: ContainerSummary) {
+    private func openContainerTerminal(
+        _ container: ContainerSummary,
+        destination: ExternalTerminalDestination
+    ) {
         guard container.state == "running" else {
             runtimeStore.errorMessage = language.resolved == .zhHans ? "容器未运行，无法进入终端。" : "The container is not running."
             return
         }
         do {
-            try SystemTerminalLauncher.openContainerShell(id: container.id)
+            try ExternalTerminalLauncher.open(
+                destination: destination,
+                target: .container(id: container.id)
+            )
         } catch {
             runtimeStore.errorMessage = error.localizedDescription
         }
@@ -325,7 +342,7 @@ struct ContainersView: View {
             ResourceTableHeaderLabel(title: "", width: 20)
             ResourceTableHeaderLabel(title: language.t(.name))
             ResourceTableHeaderLabel(title: language.t(.image), width: 180)
-            ResourceTableHeaderLabel(title: "IP", width: 118)
+            ResourceTableHeaderLabel(title: "IP", width: 154)
             ResourceTableHeaderLabel(title: language.t(.status), width: 76)
             ResourceTableHeaderLabel(title: language.t(.actions), width: 180, alignment: .trailing)
         }
@@ -642,7 +659,7 @@ private struct ContainerDetailOverview: View {
                 DetailInfoCard {
                     DetailInfoRow(title: language.t(.status), value: container.state)
                     DetailInfoRow(title: language.t(.image), value: container.imageName)
-                    DetailInfoRow(title: "IP", value: container.primaryIP, monospaced: true)
+                    CopyableIPAddressInfoRow(title: "IP", value: container.primaryIP)
                     DetailInfoRow(title: "Platform", value: container.platformName)
                     DetailInfoRow(title: "Started", value: container.startedText)
                 }

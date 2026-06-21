@@ -73,10 +73,12 @@ struct ContainerExecTabView: View {
 
     private var toolbarActions: some View {
         HStack(spacing: 8) {
-            Button {
-                openExternalTerminal()
+            Menu {
+                ExternalTerminalDestinationMenuItems { destination in
+                    openExternalTerminal(destination: destination)
+                }
             } label: {
-                Label(language.resolved == .zhHans ? "外部终端" : "External Terminal", systemImage: "macwindow")
+                Label(language.resolved == .zhHans ? "打开外部终端" : "Open external terminal", systemImage: "macwindow")
             }
             .disabled(container.state != "running")
             .help(language.resolved == .zhHans ? "在外部终端打开 Exec" : "Open Exec in external terminal")
@@ -171,9 +173,12 @@ struct ContainerExecTabView: View {
         }
     }
 
-    private func openExternalTerminal() {
+    private func openExternalTerminal(destination: ExternalTerminalDestination) {
         do {
-            try SystemTerminalLauncher.openContainerShell(id: container.id)
+            try ExternalTerminalLauncher.open(
+                destination: destination,
+                target: .container(id: container.id)
+            )
         } catch {
             store.terminalState = .failed(error.localizedDescription)
         }

@@ -13,6 +13,8 @@ struct ContentView: View {
     @AppStorage("containerdesktop.selected.section") private var selectedSectionRaw = AppSection.dashboard.rawValue
     @AppStorage("containerdesktop.sidebar.collapsed") private var isSidebarCollapsed = false
     @State private var globalSearchText = ""
+    @State private var observabilityResourceSnapshotRequestCounter = 0
+    @State private var observabilityResourceSnapshotRequestID: Int?
 
     private var selectedSection: AppSection {
         get { AppSection(rawValue: selectedSectionRaw) ?? .dashboard }
@@ -130,7 +132,8 @@ struct ContentView: View {
                     DashboardView(
                         runtimeStore: runtimeStore,
                         composeStore: composeStore,
-                        systemConfigStore: systemConfigStore
+                        systemConfigStore: systemConfigStore,
+                        onOpenResourceSnapshot: openObservabilityResourceSnapshot
                     )
                 }
             case .containers:
@@ -152,7 +155,11 @@ struct ContentView: View {
                     statsHistoryStore: statsHistoryStore
                 )
             case .observability:
-                ObservabilityView(runtimeStore: runtimeStore, composeStore: composeStore)
+                ObservabilityView(
+                    runtimeStore: runtimeStore,
+                    composeStore: composeStore,
+                    resourceSnapshotRequestID: $observabilityResourceSnapshotRequestID
+                )
             case .registries:
                 RegistriesView(runtimeStore: runtimeStore)
             case .commandConverter:
@@ -250,6 +257,12 @@ struct ContentView: View {
     private func selectSection(_ section: AppSection) {
         selectedSectionRaw = section.rawValue
         ContainerDesktopMainMenuController.shared.updateSelectedSection(section)
+    }
+
+    private func openObservabilityResourceSnapshot() {
+        observabilityResourceSnapshotRequestCounter += 1
+        observabilityResourceSnapshotRequestID = observabilityResourceSnapshotRequestCounter
+        selectSection(.observability)
     }
 
     private func sectionMatches(query: String) -> [GlobalSearchResult] {

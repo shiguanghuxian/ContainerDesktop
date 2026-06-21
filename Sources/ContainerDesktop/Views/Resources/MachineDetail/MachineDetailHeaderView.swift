@@ -100,7 +100,7 @@ struct MachineDetailHeaderView: View {
             }
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
-                detailChip(title: "IP", value: machine.ipAddressText, systemImage: "network")
+                detailChip(title: "IP", value: machine.ipAddressText, systemImage: "network", copyableIP: true)
                 detailChip(title: "Resources", value: "\(machine.cpus) CPU / \(machine.memoryDisplay)", systemImage: "cpu")
                 detailChip(title: "Disk", value: machine.diskSizeDisplay, systemImage: "internaldrive")
                 detailChip(title: language.t(.homeMount), value: inspection?.homeMount ?? "—", systemImage: "house")
@@ -114,7 +114,7 @@ struct MachineDetailHeaderView: View {
         }
     }
 
-    private func detailChip(title: String, value: String, systemImage: String) -> some View {
+    private func detailChip(title: String, value: String, systemImage: String, copyableIP: Bool = false) -> some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
                 .foregroundStyle(CDTheme.dockerBlue)
@@ -123,10 +123,20 @@ struct MachineDetailHeaderView: View {
                 Text(title)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.callout)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                if copyableIP {
+                    CopyableIPAddressText(
+                        value: value,
+                        font: .callout,
+                        foregroundStyle: AnyShapeStyle(.primary),
+                        textSelectionEnabled: true,
+                        minimumScaleFactor: 0.75
+                    )
+                } else {
+                    Text(value)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
             Spacer(minLength: 0)
         }

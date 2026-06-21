@@ -7,6 +7,7 @@ extension UserDefaults {
             "containerdesktop.appearance",
             "containerdesktop.language",
             "containerdesktop.dockerCompatibilityTerminal.style",
+            "containerdesktop.dockerCompatibilityTerminal.outputEventLimit",
         ] where defaults.object(forKey: key) == nil {
             if let existingValue = UserDefaults.standard.object(forKey: key) {
                 defaults.set(existingValue, forKey: key)

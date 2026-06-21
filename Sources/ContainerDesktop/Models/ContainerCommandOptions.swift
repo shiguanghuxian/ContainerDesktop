@@ -224,6 +224,28 @@ struct VolumeCreateOptions: Hashable, Sendable {
     }
 }
 
+struct NetworkCreateOptions: Hashable, Sendable {
+    var name: String
+    var internalOnly = false
+    var plugin: String?
+    var subnet: String?
+    var subnetV6: String?
+    var labels: [String] = []
+    var options: [String] = []
+
+    var arguments: [String] {
+        var arguments = ["network", "create"]
+        if internalOnly { arguments.append("--internal") }
+        arguments.appendRepeated("--label", labels)
+        arguments.appendRepeated("--option", options)
+        arguments.appendOption("--plugin", plugin)
+        arguments.appendOption("--subnet", subnet)
+        arguments.appendOption("--subnet-v6", subnetV6)
+        arguments.append(name.trimmed)
+        return arguments
+    }
+}
+
 extension Array where Element == String {
     mutating func appendOption(_ name: String, _ value: String?) {
         guard let value = value?.nilIfBlank else { return }

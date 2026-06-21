@@ -165,4 +165,30 @@ struct ContainerCommandOptionsTests {
             "data",
         ])
     }
+
+    @Test("builds network create arguments")
+    func buildsNetworkCreateArguments() {
+        let options = NetworkCreateOptions(
+            name: " app-net ",
+            internalOnly: true,
+            plugin: "container-network-vmnet",
+            subnet: "192.168.100.0/24",
+            subnetV6: "fd00:100::/64",
+            labels: ["app=web", "   ", "tier=edge"],
+            options: ["mtu=1500", "", "bridge=custom0"]
+        )
+
+        #expect(options.arguments == [
+            "network", "create",
+            "--internal",
+            "--label", "app=web",
+            "--label", "tier=edge",
+            "--option", "mtu=1500",
+            "--option", "bridge=custom0",
+            "--plugin", "container-network-vmnet",
+            "--subnet", "192.168.100.0/24",
+            "--subnet-v6", "fd00:100::/64",
+            "app-net",
+        ])
+    }
 }

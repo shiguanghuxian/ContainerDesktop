@@ -227,6 +227,30 @@ struct DetailInfoRow: View {
     }
 }
 
+struct CopyableIPAddressInfoRow: View {
+    var title: String
+    var value: String
+    var monospaced = true
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .frame(width: 112, alignment: .leading)
+            CopyableIPAddressText(
+                value: value,
+                font: monospaced ? .callout.monospaced() : .callout,
+                foregroundStyle: AnyShapeStyle(.primary),
+                textSelectionEnabled: true,
+                lineLimit: 2,
+                minimumScaleFactor: 0.75
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.callout)
+    }
+}
+
 struct DetailInfoCard<Content: View>: View {
     @ViewBuilder var content: Content
 

@@ -21,12 +21,20 @@ final class DockerCompatibilityTerminalTab: Identifiable {
     var workingDirectory: URL {
         store.workingDirectory
     }
+
+    var openRequest: DockerCompatibilityTerminalOpenRequest {
+        store.openRequest
+    }
+
+    var shellTarget: TerminalShellTarget? {
+        store.shellTarget
+    }
 }
 
 enum DockerCompatibilityTerminalTabCloseResult: Equatable {
     case noTabClosed
     case closedTab
-    case closedLastTab
+    case replacedLastTab
 }
 
 @MainActor
@@ -35,7 +43,7 @@ final class DockerCompatibilityTerminalTabsStore {
     var tabs: [DockerCompatibilityTerminalTab] = []
     var selectedTabID: UUID?
 
-    @ObservationIgnored private let makeStore: (URL) -> DockerCompatibilityTerminalStore
+    @ObservationIgnored private let makeStore: (DockerCompatibilityTerminalOpenRequest) -> DockerCompatibilityTerminalStore
     @ObservationIgnored private var nextTabOrdinal = 1
 
     init(
@@ -44,8 +52,23 @@ final class DockerCompatibilityTerminalTabsStore {
             DockerCompatibilityTerminalStore(workingDirectory: workingDirectory)
         }
     ) {
+        self.makeStore = { request in
+            if request.shellTarget == nil {
+                return makeStore(request.workingDirectory)
+            }
+            return DockerCompatibilityTerminalStore(openRequest: request)
+        }
+        newTab(request: DockerCompatibilityTerminalOpenRequest(workingDirectory: initialWorkingDirectory))
+    }
+
+    init(
+        initialRequest: DockerCompatibilityTerminalOpenRequest,
+        makeStore: @escaping (DockerCompatibilityTerminalOpenRequest) -> DockerCompatibilityTerminalStore = { request in
+            DockerCompatibilityTerminalStore(openRequest: request)
+        }
+    ) {
         self.makeStore = makeStore
-        newTab(workingDirectory: initialWorkingDirectory)
+        newTab(request: initialRequest)
     }
 
     var selectedTab: DockerCompatibilityTerminalTab? {
@@ -58,12 +81,17 @@ final class DockerCompatibilityTerminalTabsStore {
         let resolvedWorkingDirectory = workingDirectory
             ?? selectedTab?.workingDirectory
             ?? AppPaths.homeDirectory
+        return newTab(request: DockerCompatibilityTerminalOpenRequest(workingDirectory: resolvedWorkingDirectory))
+    }
+
+    @discardableResult
+    func newTab(request: DockerCompatibilityTerminalOpenRequest) -> DockerCompatibilityTerminalTab {
         let ordinal = nextTabOrdinal
         nextTabOrdinal += 1
 
         let tab = DockerCompatibilityTerminalTab(
-            title: Self.title(for: resolvedWorkingDirectory, ordinal: ordinal),
-            store: makeStore(resolvedWorkingDirectory)
+            title: Self.title(for: request, ordinal: ordinal),
+            store: makeStore(request)
         )
         tabs.append(tab)
         selectedTabID = tab.id
@@ -72,7 +100,9 @@ final class DockerCompatibilityTerminalTabsStore {
 
     @discardableResult
     func closeSelectedTab() -> DockerCompatibilityTerminalTabCloseResult {
-        guard let selectedTabID else { return .noTabClosed }
+        guard let selectedTabID = selectedTabID ?? tabs.first?.id else {
+            return .noTabClosed
+        }
         return closeTab(id: selectedTabID)
     }
 
@@ -83,11 +113,13 @@ final class DockerCompatibilityTerminalTabsStore {
         }
 
         let tab = tabs.remove(at: index)
+        let replacementWorkingDirectory = tab.workingDirectory
         tab.store.stopTerminal()
 
         guard !tabs.isEmpty else {
             selectedTabID = nil
-            return .closedLastTab
+            newTab(workingDirectory: replacementWorkingDirectory)
+            return .replacedLastTab
         }
 
         let hasValidSelection = selectedTabID.map { selectedID in
@@ -129,8 +161,11 @@ final class DockerCompatibilityTerminalTabsStore {
         selectedTabID = tabs[nextIndex].id
     }
 
-    private static func title(for workingDirectory: URL, ordinal: Int) -> String {
-        let standardized = workingDirectory.standardizedFileURL
+    private static func title(for request: DockerCompatibilityTerminalOpenRequest, ordinal: Int) -> String {
+        if let shellTarget = request.shellTarget {
+            return shellTarget.tabTitle
+        }
+        let standardized = request.workingDirectory.standardizedFileURL
         let pathComponent = standardized.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         if !pathComponent.isEmpty {
             return pathComponent

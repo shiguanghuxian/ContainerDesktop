@@ -468,18 +468,11 @@ struct ContainerCLIClient: Sendable {
     }
 
     func createNetwork(name: String, internalOnly: Bool = false, subnet: String? = nil, subnetV6: String? = nil) async throws {
-        var arguments = ["network", "create"]
-        if internalOnly {
-            arguments.append("--internal")
-        }
-        if let subnet {
-            arguments.append(contentsOf: ["--subnet", subnet])
-        }
-        if let subnetV6 {
-            arguments.append(contentsOf: ["--subnet-v6", subnetV6])
-        }
-        arguments.append(name)
-        _ = try await runner.run(executable: "container", arguments: arguments, timeout: 60)
+        try await createNetwork(NetworkCreateOptions(name: name, internalOnly: internalOnly, subnet: subnet, subnetV6: subnetV6))
+    }
+
+    func createNetwork(_ options: NetworkCreateOptions) async throws {
+        _ = try await runner.run(executable: "container", arguments: options.arguments, timeout: 60)
     }
 
     func deleteNetwork(_ name: String) async throws {

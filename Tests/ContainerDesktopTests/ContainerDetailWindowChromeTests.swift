@@ -63,6 +63,39 @@ struct ContainerDetailWindowChromeTests {
         #expect(contentSource.contains("TechBackdrop()"))
     }
 
+    @Test("custom drag regions support double click window zoom")
+    func customDragRegionsSupportDoubleClickWindowZoom() throws {
+        let helperSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Common/WindowDragZoomRegion.swift",
+            encoding: .utf8
+        )
+        let chromeSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/AppChrome.swift",
+            encoding: .utf8
+        )
+        let terminalTabsSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/DockerCompatibilityTerminal/DockerCompatibilityTerminalTabsView.swift",
+            encoding: .utf8
+        )
+
+        #expect(helperSource.contains("struct WindowDragZoomRegion"))
+        #expect(helperSource.contains("WindowDragGesture()"))
+        #expect(helperSource.contains(".allowsWindowActivationEvents(true)"))
+        #expect(helperSource.contains("performZoom(nil)"))
+        #expect(chromeSource.contains("WindowDragZoomRegion()"))
+        #expect(!chromeSource.contains(".simultaneousGesture(WindowDragGesture())"))
+        #expect(terminalTabsSource.contains("private var dragRegion: some View {\n        WindowDragZoomRegion()"))
+        #expect(!terminalTabsSource.contains(".gesture(WindowDragGesture())"))
+
+        let tabItemStart = try #require(terminalTabsSource.range(of: "private func tabItem"))
+        let addTabButtonStart = try #require(terminalTabsSource.range(of: "private var addTabButton"))
+        let dragRegionStart = try #require(terminalTabsSource.range(of: "private var dragRegion"))
+        let tabItemSource = String(terminalTabsSource[tabItemStart.lowerBound..<addTabButtonStart.lowerBound])
+        let addTabButtonSource = String(terminalTabsSource[addTabButtonStart.lowerBound..<dragRegionStart.lowerBound])
+        #expect(!tabItemSource.contains("WindowDragZoomRegion"))
+        #expect(!addTabButtonSource.contains("WindowDragZoomRegion"))
+    }
+
     @Test("runtime operation feedback uses centered snackbar")
     func runtimeOperationFeedbackUsesCenteredSnackbar() throws {
         let contentSource = try String(

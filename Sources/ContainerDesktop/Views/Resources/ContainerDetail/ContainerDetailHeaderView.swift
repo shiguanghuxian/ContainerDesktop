@@ -42,7 +42,7 @@ struct ContainerDetailHeaderView: View {
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 170, maximum: 320), spacing: 10)], spacing: 10) {
                 detailChip(title: language.t(.image), value: container.imageName, systemImage: "cube")
-                detailChip(title: "IP", value: container.primaryIP, systemImage: "network")
+                detailChip(title: "IP", value: container.primaryIP, systemImage: "network", copyableIP: true)
                 detailChip(title: "Platform", value: container.platformName, systemImage: "desktopcomputer")
                 detailChip(title: "Resources", value: "\(container.cpuCount) CPU / \(container.memoryDisplay)", systemImage: "cpu")
             }
@@ -75,10 +75,7 @@ struct ContainerDetailHeaderView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
-                    Label(portSummary, systemImage: "point.3.connected.trianglepath.dotted")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+                    portSummaryLine
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -130,7 +127,21 @@ struct ContainerDetailHeaderView: View {
         .fixedSize()
     }
 
-    private func detailChip(title: String, value: String, systemImage: String) -> some View {
+    private var portSummaryLine: some View {
+        HStack(spacing: 8) {
+            Label(portSummary, systemImage: "point.3.connected.trianglepath.dotted")
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+
+            ContainerBrowserPortInlineMenuButton(
+                targets: browserPortTargets,
+                isDisabled: container.state != "running"
+            )
+        }
+    }
+
+    private func detailChip(title: String, value: String, systemImage: String, copyableIP: Bool = false) -> some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
                 .foregroundStyle(CDTheme.dockerBlue)
@@ -139,10 +150,20 @@ struct ContainerDetailHeaderView: View {
                 Text(title)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.callout)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                if copyableIP {
+                    CopyableIPAddressText(
+                        value: value,
+                        font: .callout,
+                        foregroundStyle: AnyShapeStyle(.primary),
+                        textSelectionEnabled: true,
+                        minimumScaleFactor: 0.75
+                    )
+                } else {
+                    Text(value)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -155,62 +176,10 @@ struct ContainerDetailHeaderView: View {
     }
 
     private var portSummary: String {
-        let values = Self.extractPortStrings(from: inspectText)
-        if values.isEmpty { return "No ports" }
-        return values.prefix(3).joined(separator: ", ")
+        ContainerBrowserPortTarget.portSummary(from: inspectText)
     }
 
-    private static func extractPortStrings(from text: String) -> [String] {
-        guard let data = text.data(using: .utf8),
-              let value = try? JSONDecoder.containerDesktop.decode(JSONValue.self, from: data) else {
-            return []
-        }
-        return extractPortStrings(from: value)
-    }
-
-    private static func extractPortStrings(from value: JSONValue) -> [String] {
-        let object: [String: JSONValue]?
-        switch value {
-        case .array(let values):
-            if case .object(let first)? = values.first {
-                object = first
-            } else {
-                object = nil
-            }
-        case .object(let raw):
-            object = raw
-        default:
-            object = nil
-        }
-
-        guard let configuration = object?["configuration"],
-              case .object(let config) = configuration,
-              let publishedPorts = config["publishedPorts"],
-              case .array(let ports) = publishedPorts else {
-            return []
-        }
-
-        return ports.compactMap { port in
-            guard case .object(let item) = port else { return nil }
-            let hostPort = item["hostPort"]?.plainText ?? item["host"]?.plainText
-            let containerPort = item["containerPort"]?.plainText ?? item["port"]?.plainText
-            let proto = item["protocol"]?.plainText ?? "tcp"
-            if let hostPort, let containerPort {
-                return "\(hostPort):\(containerPort)/\(proto)"
-            }
-            return containerPort.map { "\($0)/\(proto)" }
-        }
-    }
-}
-
-private extension JSONValue {
-    var plainText: String? {
-        switch self {
-        case .string(let value): value
-        case .number(let value):
-            value.rounded() == value ? String(Int64(value)) : String(value)
-        case .bool(let value): String(value)
-        default: nil
-        }
+    private var browserPortTargets: [ContainerBrowserPortTarget] {
+        ContainerBrowserPortTarget.targets(from: inspectText, container: container)
     }
 }

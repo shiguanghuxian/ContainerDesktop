@@ -7,6 +7,7 @@ struct VolumeFileEntry: Identifiable, Hashable, Sendable {
     var isDirectory: Bool
     var size: Int64?
     var modifiedAt: Date?
+    var isHostBacked = true
 
     var systemImage: String {
         isDirectory ? "folder" : "doc"
@@ -28,6 +29,7 @@ struct VolumeDirectorySnapshot: Hashable, Sendable {
     var currentURL: URL
     var relativePath: String
     var entries: [VolumeFileEntry]
+    var isHostBacked = true
 
     var displayPath: String {
         relativePath.isEmpty ? "/" : "/\(relativePath)"

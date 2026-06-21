@@ -63,14 +63,14 @@ final class ComposeProjectStore {
     }
 
     func addProject(fileURL: URL) async {
-        do {
-            let project = try ComposeParser.parse(fileURL: fileURL)
-            projects.removeAll { $0.id == project.id }
-            projects.insert(project, at: 0)
-            persist()
-        } catch {
-            errorMessage = error.localizedDescription
+        upsertProject(fileURL: fileURL, reportError: true)
+    }
+
+    func registerExternalProject(fileURL: URL) async {
+        if !hasLoaded {
+            await load()
         }
+        upsertProject(fileURL: fileURL.standardizedFileURL, reportError: false)
     }
 
     func removeProject(_ project: ComposeProject) {
@@ -149,6 +149,20 @@ final class ComposeProjectStore {
             )
             errorMessage = output
             lastOutput = output
+        }
+    }
+
+    private func upsertProject(fileURL: URL, reportError: Bool) {
+        do {
+            let project = try ComposeParser.parse(fileURL: fileURL)
+            projects.removeAll { $0.id == project.id }
+            projects.insert(project, at: 0)
+            errorMessage = nil
+            persist()
+        } catch {
+            if reportError {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

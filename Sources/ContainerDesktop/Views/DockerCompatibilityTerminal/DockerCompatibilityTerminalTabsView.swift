@@ -5,13 +5,10 @@ struct DockerCompatibilityTerminalTabsView: View {
     @AppStorage(DockerCompatibilityTerminalStyle.defaultsKey, store: .containerDesktopShared) private var styleRaw = DockerCompatibilityTerminalStyle.defaultStyle.rawValue
     @Bindable var tabsStore: DockerCompatibilityTerminalTabsStore
     var onOpenStyleSettings: (() -> Void)?
-    var onCloseWindow: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
-            if tabsStore.tabs.count > 1 {
-                tabBar
-            }
+            topChrome
 
             if let selectedTab = tabsStore.selectedTab {
                 DockerCompatibilityTerminalView(
@@ -37,8 +34,60 @@ struct DockerCompatibilityTerminalTabsView: View {
         terminalStyle.configuration.background.color
     }
 
+    private var palette: DockerCompatibilityTerminalChromePalette {
+        DockerCompatibilityTerminalWindowChrome.palette(for: terminalStyle)
+    }
+
+    @ViewBuilder
+    private var topChrome: some View {
+        if tabsStore.tabs.count > 1 {
+            tabBar
+        } else {
+            singleTabDragBar
+        }
+    }
+
+    private var singleTabDragBar: some View {
+        HStack(spacing: 10) {
+            Spacer()
+                .frame(width: DockerCompatibilityTerminalWindowChrome.trafficLightReservedWidth)
+
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(statusColor(for: tabsStore.selectedTab?.store.terminalState ?? .disconnected))
+                    .frame(width: 7, height: 7)
+                Text(DockerCompatibilityTerminalStrings.windowTitle(language))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.foreground)
+                    .lineLimit(1)
+                if let selectedTab = tabsStore.selectedTab {
+                    Text(selectedTab.title)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(palette.subduedForeground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            dragRegion
+
+            addTabButton
+                .padding(.trailing, 8)
+        }
+        .frame(height: 34)
+        .background(palette.background)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(palette.separator)
+                .frame(height: 1)
+        }
+    }
+
     private var tabBar: some View {
         HStack(spacing: 0) {
+            Spacer()
+                .frame(width: DockerCompatibilityTerminalWindowChrome.trafficLightReservedWidth)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(tabsStore.tabs) { tab in
@@ -49,28 +98,22 @@ struct DockerCompatibilityTerminalTabsView: View {
                 .padding(.vertical, 5)
             }
 
+            dragRegion
+                .frame(width: 28)
+
             Rectangle()
-                .fill(.white.opacity(0.12))
+                .fill(palette.separator)
                 .frame(width: 1)
                 .padding(.vertical, 6)
 
-            Button {
-                tabsStore.newTab()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 30, height: 26)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.84))
-            .help(DockerCompatibilityTerminalStrings.newTab(language))
+            addTabButton
             .padding(.horizontal, 6)
         }
-        .frame(height: 36)
-        .background(.black.opacity(0.76))
+        .frame(height: 38)
+        .background(palette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(.white.opacity(0.12))
+                .fill(palette.separator)
                 .frame(height: 1)
         }
     }
@@ -89,11 +132,11 @@ struct DockerCompatibilityTerminalTabsView: View {
                         .font(.caption.weight(isSelected ? .semibold : .medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(maxWidth: 160, alignment: .leading)
+                        .frame(minWidth: 74, maxWidth: 170, alignment: .leading)
                 }
                 .padding(.leading, 9)
                 .padding(.trailing, 4)
-                .frame(height: 26)
+                .frame(height: 27)
             }
             .buttonStyle(.plain)
 
@@ -106,20 +149,38 @@ struct DockerCompatibilityTerminalTabsView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(isSelected ? 0.72 : 0.48))
+            .foregroundStyle(isSelected ? palette.subduedForeground : palette.mutedForeground)
             .help(DockerCompatibilityTerminalStrings.closeTab(language))
             .padding(.trailing, 5)
         }
-        .foregroundStyle(.white.opacity(isSelected ? 0.92 : 0.66))
-        .background(tabBackground(isSelected: isSelected), in: RoundedRectangle(cornerRadius: 7))
+        .foregroundStyle(isSelected ? palette.foreground : palette.subduedForeground)
+        .background(tabBackground(isSelected: isSelected), in: RoundedRectangle(cornerRadius: 6))
         .overlay {
-            RoundedRectangle(cornerRadius: 7)
-                .strokeBorder(.white.opacity(isSelected ? 0.18 : 0.08))
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isSelected ? palette.selectedTabBorder : palette.separator)
         }
     }
 
     private func tabBackground(isSelected: Bool) -> Color {
-        isSelected ? .white.opacity(0.14) : .white.opacity(0.06)
+        isSelected ? palette.selectedTabBackground : palette.inactiveTabBackground
+    }
+
+    private var addTabButton: some View {
+        Button {
+            tabsStore.newTab()
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 30, height: 26)
+                .background(palette.controlBackground, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.foreground)
+        .help(DockerCompatibilityTerminalStrings.newTab(language))
+    }
+
+    private var dragRegion: some View {
+        WindowDragZoomRegion()
     }
 
     private func statusColor(for state: TerminalSessionState) -> Color {
@@ -136,8 +197,6 @@ struct DockerCompatibilityTerminalTabsView: View {
     }
 
     private func closeTab(_ id: UUID) {
-        if tabsStore.closeTab(id: id) == .closedLastTab {
-            onCloseWindow?()
-        }
+        tabsStore.closeTab(id: id)
     }
 }

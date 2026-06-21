@@ -8,6 +8,10 @@ struct NetworksView: View {
     @State private var subnet = ""
     @State private var subnetV6 = ""
     @State private var internalOnly = false
+    @State private var plugin = ""
+    @State private var labels = ""
+    @State private var options = ""
+    @State private var showAdvancedCreateOptions = false
     @State private var showCreatePopover = false
     @State private var detailName: String?
     @State private var selectedName: String?
@@ -220,6 +224,27 @@ struct NetworksView: View {
                 .frame(width: 300)
             Toggle("Internal", isOn: $internalOnly)
                 .toggleStyle(.switch)
+            DisclosureGroup(
+                isExpanded: $showAdvancedCreateOptions
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("container-network-vmnet", text: $plugin)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 320)
+                    TextField("--label key=value, one per line", text: $labels, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                        .frame(width: 320)
+                    TextField("--option key=value, one per line", text: $options, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                        .frame(width: 320)
+                }
+                .padding(.top, 8)
+            } label: {
+                Text(language.resolved == .zhHans ? "高级参数" : "Advanced")
+                    .font(.callout.weight(.medium))
+            }
             HStack {
                 Spacer()
                 Button("取消") {
@@ -227,16 +252,25 @@ struct NetworksView: View {
                 }
                 .help(language.resolved == .zhHans ? "取消创建网络" : "Cancel creating network")
                 Button(language.t(.create)) {
-                    let name = newNetworkName
-                    let ipv4 = subnet
-                    let ipv6 = subnetV6
-                    let internalFlag = internalOnly
+                    let createOptions = NetworkCreateOptions(
+                        name: newNetworkName,
+                        internalOnly: internalOnly,
+                        plugin: plugin,
+                        subnet: subnet,
+                        subnetV6: subnetV6,
+                        labels: lines(from: labels),
+                        options: lines(from: options)
+                    )
                     newNetworkName = ""
                     subnet = ""
                     subnetV6 = ""
                     internalOnly = false
+                    plugin = ""
+                    labels = ""
+                    options = ""
+                    showAdvancedCreateOptions = false
                     showCreatePopover = false
-                    Task { await runtimeStore.createNetwork(name: name, subnet: ipv4, subnetV6: ipv6, internalOnly: internalFlag) }
+                    Task { await runtimeStore.createNetwork(options: createOptions) }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(runtimeStore.activeOperationKey != nil)
@@ -256,5 +290,12 @@ struct NetworksView: View {
             ResourceTableHeaderLabel(title: language.t(.created), width: 140)
             ResourceTableHeaderLabel(title: language.t(.actions), width: 78, alignment: .trailing)
         }
+    }
+
+    private func lines(from text: String) -> [String] {
+        text
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmed }
+            .filter { !$0.isEmpty }
     }
 }

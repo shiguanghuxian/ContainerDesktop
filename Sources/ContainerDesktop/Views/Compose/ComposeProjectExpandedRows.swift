@@ -8,13 +8,17 @@ struct ComposeProjectExpandedRows: View {
     var activeContainerActionKey: String?
     var activeRuntimeOperationKey: String?
     var onOpenContainer: (ContainerSummary) -> Void
-    var onOpenTerminal: (ComposeServiceRuntimeSummary) -> Void
+    var onOpenTerminal: (ComposeServiceRuntimeSummary, ExternalTerminalDestination) -> Void
     var onObserveService: (ComposeServiceRuntimeSummary) -> Void
     var onStartContainers: (ComposeServiceRuntimeSummary) -> Void
     var onStopContainers: (ComposeServiceRuntimeSummary) -> Void
     var onRestartContainers: (ComposeServiceRuntimeSummary) -> Void
     var onStartContainer: (ContainerSummary) -> Void
     var onStopContainer: (ContainerSummary) -> Void
+    var browserPortTargets: (ContainerSummary) -> [ContainerBrowserPortTarget]
+    var isBrowserPortTargetsLoading: (ContainerSummary) -> Bool
+    var browserPortTargetError: (ContainerSummary) -> String?
+    var onLoadBrowserPortTargets: (ContainerSummary) async -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,7 +76,11 @@ struct ComposeProjectExpandedRows: View {
                             activeRuntimeOperationKey: activeRuntimeOperationKey,
                             onOpenContainer: onOpenContainer,
                             onStartContainer: onStartContainer,
-                            onStopContainer: onStopContainer
+                            onStopContainer: onStopContainer,
+                            browserPortTargets: browserPortTargets,
+                            isBrowserPortTargetsLoading: isBrowserPortTargetsLoading,
+                            browserPortTargetError: browserPortTargetError,
+                            onLoadBrowserPortTargets: onLoadBrowserPortTargets
                         )
 
                         if index < summary.containers.count - 1 {
@@ -184,6 +192,10 @@ private struct ComposeContainerInlineRow: View {
     var onOpenContainer: (ContainerSummary) -> Void
     var onStartContainer: (ContainerSummary) -> Void
     var onStopContainer: (ContainerSummary) -> Void
+    var browserPortTargets: (ContainerSummary) -> [ContainerBrowserPortTarget]
+    var isBrowserPortTargetsLoading: (ContainerSummary) -> Bool
+    var browserPortTargetError: (ContainerSummary) -> String?
+    var onLoadBrowserPortTargets: (ContainerSummary) async -> Void
     @State private var isHovering = false
 
     var body: some View {
@@ -206,25 +218,39 @@ private struct ComposeContainerInlineRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(width: 160, alignment: .leading)
-
-                    Text(container.primaryIP)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .frame(width: 108, alignment: .leading)
-
-                    CompactComposeStatusPill(
-                        title: container.state,
-                        systemImage: container.state == "running" ? "play.fill" : "stop.fill",
-                        tint: container.state == "running" ? CDTheme.lime : .secondary
-                    )
-                    .frame(width: 86, alignment: .leading)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .help(language.resolved == .zhHans ? "打开容器详情" : "Open container details")
+
+            HStack(spacing: 6) {
+                CopyableIPAddressText(
+                    value: container.primaryIP,
+                    font: .caption2.monospaced(),
+                    minimumScaleFactor: 0.78,
+                    copyButtonSize: 20
+                )
+                .frame(width: 108, alignment: .leading)
+
+                ContainerBrowserPortMenuButton(
+                    targets: browserPortTargets(container),
+                    isLoading: isBrowserPortTargetsLoading(container),
+                    errorMessage: browserPortTargetError(container)
+                )
+            }
+            .frame(width: 142, alignment: .leading)
+            .task(id: "\(container.id)-\(container.state)") {
+                await onLoadBrowserPortTargets(container)
+            }
+
+            CompactComposeStatusPill(
+                title: container.state,
+                systemImage: container.state == "running" ? "play.fill" : "stop.fill",
+                tint: container.state == "running" ? CDTheme.lime : .secondary
+            )
+            .frame(width: 86, alignment: .leading)
 
             HStack(spacing: 5) {
                 let startStopKey = container.state == "running"
@@ -253,7 +279,7 @@ private struct ComposeContainerInlineRow: View {
                     onOpenContainer(container)
                 }
             }
-            .frame(width: 54, alignment: .trailing)
+            .frame(width: 56, alignment: .trailing)
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)

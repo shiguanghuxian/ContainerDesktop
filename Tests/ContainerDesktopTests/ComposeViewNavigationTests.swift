@@ -18,6 +18,17 @@ struct ComposeViewNavigationTests {
         #expect(source.contains(".frame(width: projectActionColumnWidth, alignment: .trailing)"))
     }
 
+    @Test("compose view explains terminal auto registration")
+    func composeViewExplainsTerminalAutoRegistration() throws {
+        let source = try composeViewSource()
+
+        #expect(source.contains("普通系统终端创建或启动的 Compose 项目不会自动出现在这里"))
+        #expect(source.contains("Docker 兼容终端中的 docker compose 命令会自动登记"))
+        #expect(source.contains("regular system terminal do not appear here automatically"))
+        #expect(source.contains("docker compose commands in the Docker Compatibility Terminal are registered automatically"))
+        #expect(source.contains("StatusBanner(text: composeRegistrationHintText, systemImage: \"info.circle\""))
+    }
+
     private func composeViewSource() throws -> String {
         try String(
             contentsOfFile: "Sources/ContainerDesktop/Views/Compose/ComposeView.swift",

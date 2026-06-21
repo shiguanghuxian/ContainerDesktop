@@ -107,6 +107,72 @@ struct RuntimeStoreContainerBatchTests {
     }
 
     @MainActor
+    @Test("creates network with advanced options and refreshes resources")
+    func createsNetworkWithAdvancedOptionsAndRefreshesResources() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        await store.createNetwork(options: NetworkCreateOptions(
+            name: " app-net ",
+            internalOnly: true,
+            plugin: "container-network-vmnet",
+            subnet: "192.168.100.0/24",
+            subnetV6: "fd00:100::/64",
+            labels: ["app=web", "tier=edge"],
+            options: ["mtu=1500"]
+        ))
+
+        #expect(store.busyMessage == nil)
+        #expect(store.errorMessage == nil)
+        #expect(store.operationFeedback?.phase == .succeeded)
+        #expect(store.operationFeedback?.message == "已创建网络 app-net")
+
+        let log = try fake.commandLog()
+        #expect(log.contains("network create --internal --label app=web --label tier=edge --option mtu=1500 --plugin container-network-vmnet --subnet 192.168.100.0/24 --subnet-v6 fd00:100::/64 app-net\n"))
+        #expect(log.split(separator: "\n").filter { $0 == "network list --format json" }.count == 1)
+    }
+
+    @MainActor
+    @Test("loads caches and clears browser port targets")
+    func loadsCachesAndClearsBrowserPortTargets() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+        let container = ContainerSummary(
+            configuration: .init(
+                id: "web-ports",
+                image: .init(reference: "nginx:latest"),
+                platform: .init(os: "linux", architecture: "arm64"),
+                resources: .init(cpus: 1, memoryInBytes: 1_073_741_824),
+                creationDate: nil,
+                labels: [:]
+            ),
+            status: .init(
+                state: "running",
+                networks: [.init(ipv4Address: "192.168.64.2")],
+                startedDate: nil
+            )
+        )
+
+        await store.loadBrowserPortTargets(for: container)
+        await store.loadBrowserPortTargets(for: container)
+
+        #expect(store.browserPortTargets(for: container).map(\.url.absoluteString) == [
+            "http://127.0.0.1:8080",
+            "http://192.168.64.2:80",
+        ])
+        #expect(try fake.commandLog().split(separator: "\n").filter { $0 == "inspect web-ports" }.count == 1)
+
+        await store.refreshAll()
+
+        #expect(store.browserPortTargets(for: container).isEmpty)
+
+        await store.loadBrowserPortTargets(for: container)
+        await store.startContainer("web-ports")
+
+        #expect(store.browserPortTargets(for: container).isEmpty)
+    }
+
+    @MainActor
     @Test("operation feedback reports failures and can dismiss")
     func operationFeedbackReportsFailuresAndDismisses() async throws {
         let fake = try FakeBatchContainerCLI()
@@ -430,6 +496,9 @@ private struct FakeBatchContainerCLI {
           "start web-1"|"start api-1"|"stop web-1"|"stop api-1")
             echo "ok"
             ;;
+          "start web-ports")
+            echo "started"
+            ;;
           "start slow-container")
             sleep 0.2
             echo "slow ok"
@@ -512,6 +581,20 @@ private struct FakeBatchContainerCLI {
           "image delete missing:latest")
             echo "image is used by a container" >&2
             exit 74
+            ;;
+          "network create --internal --label app=web --label tier=edge --option mtu=1500 --plugin container-network-vmnet --subnet 192.168.100.0/24 --subnet-v6 fd00:100::/64 app-net")
+            echo "network created"
+            ;;
+          "inspect web-ports")
+            cat <<'JSON'
+        {
+          "configuration": {
+            "publishedPorts": [
+              { "hostIP": "0.0.0.0", "hostPort": 8080, "containerPort": 80, "protocol": "tcp" }
+            ]
+          }
+        }
+        JSON
             ;;
           "system status --format json")
             echo '{"status":"running"}'
