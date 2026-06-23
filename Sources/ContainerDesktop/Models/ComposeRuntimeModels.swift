@@ -103,6 +103,11 @@ extension ComposeProject {
         service: Service,
         imageCounts: [String: Int]
     ) -> Bool {
+        if let containerName = service.containerName?.nilIfBlank,
+           container.id == containerName {
+            return true
+        }
+
         let labels = container.labels.mapKeys { $0.lowercased() }
         let projectLabel = labels["com.docker.compose.project"]
             ?? labels["com.apple.container.compose.project"]
@@ -112,16 +117,20 @@ extension ComposeProject {
             ?? labels["containerdesktop.compose.service"]
 
         if let projectLabel, let serviceLabel {
-            return projectLabel.caseInsensitiveCompare(name) == .orderedSame
+            return runtimeProjectNameCandidates.contains {
+                projectLabel.caseInsensitiveCompare($0) == .orderedSame
+            }
                 && serviceLabel.caseInsensitiveCompare(service.name) == .orderedSame
         }
 
         let normalizedID = container.id.normalizedComposeToken
-        let projectToken = name.normalizedComposeToken
+        let projectTokens = runtimeProjectNameCandidates
+            .map(\.normalizedComposeToken)
+            .filter { !$0.isEmpty }
         let serviceToken = service.name.normalizedComposeToken
         if !serviceToken.isEmpty,
            normalizedID.contains(serviceToken),
-           (projectToken.isEmpty || normalizedID.contains(projectToken)) {
+           (projectTokens.isEmpty || projectTokens.contains { normalizedID.contains($0) }) {
             return true
         }
 
@@ -132,6 +141,16 @@ extension ComposeProject {
         }
 
         return false
+    }
+
+    private var runtimeProjectNameCandidates: [String] {
+        [
+            name,
+            path.deletingLastPathComponent().lastPathComponent,
+            path.deletingPathExtension().lastPathComponent,
+        ]
+        .compactMap(\.nilIfBlank)
+        .uniquedCaseInsensitive()
     }
 }
 
@@ -145,5 +164,14 @@ private extension String {
     var normalizedComposeToken: String {
         lowercased()
             .filter { $0.isLetter || $0.isNumber }
+    }
+}
+
+private extension Array where Element == String {
+    func uniquedCaseInsensitive() -> [String] {
+        var seen = Set<String>()
+        return filter { value in
+            seen.insert(value.lowercased()).inserted
+        }
     }
 }

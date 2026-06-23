@@ -266,6 +266,9 @@ struct DockerCompatibilityTerminalView: View {
             onSizeChange: { columns, rows in
                 store.resizeTerminal(columns: columns, rows: rows)
             },
+            onCurrentDirectoryChange: { directory in
+                store.updateCurrentDirectory(fromTerminalDirectory: directory)
+            },
             onInput: { data in
                 store.sendTerminalInputData(data)
             }

@@ -22,6 +22,8 @@ struct RuntimeOperationFeedback: Identifiable, Equatable, Sendable {
     var id = UUID()
     var message: String
     var phase: Phase
+    var commandPreview: String?
+    var failureSummary: String?
 }
 
 @MainActor
@@ -100,6 +102,7 @@ final class RuntimeStore {
     @ObservationIgnored private var resourceMonitorTask: Task<Void, Never>?
     @ObservationIgnored private var isResourceMonitorSampling = false
     @ObservationIgnored private var operationFeedbackDismissTask: Task<Void, Never>?
+    @ObservationIgnored private var operationStore: AppOperationStore?
 
     init(
         client: ContainerCLIClient = ContainerCLIClient(),
@@ -113,6 +116,10 @@ final class RuntimeStore {
 
     var isReady: Bool {
         environment.containerAvailable && environment.systemRunning
+    }
+
+    func bindOperationStore(_ operationStore: AppOperationStore) {
+        self.operationStore = operationStore
     }
 
     var menuBarTitle: String {
@@ -343,19 +350,23 @@ final class RuntimeStore {
     }
 
     func startSystem() async {
-        await perform("启动 container system", operationKey: RuntimeOperationKey.systemStart) {
+        await perform("启动 container system", operationKey: RuntimeOperationKey.systemStart, commandPreview: "container system start") {
             try await client.startSystem()
         }
     }
 
     func stopSystem() async {
-        await perform("停止 container system", operationKey: RuntimeOperationKey.systemStop) {
+        await perform("停止 container system", operationKey: RuntimeOperationKey.systemStop, commandPreview: "container system stop") {
             try await client.stopSystem()
         }
     }
 
     func startContainer(_ id: String) async {
-        await perform("启动容器 \(id)", operationKey: RuntimeOperationKey.containerStart(id)) {
+        await perform(
+            "启动容器 \(id)",
+            operationKey: RuntimeOperationKey.containerStart(id),
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["start", id])
+        ) {
             try await client.startContainer(id)
         }
     }
@@ -377,7 +388,12 @@ final class RuntimeStore {
             errorMessage = error.localizedDescription
             return
         }
-        await perform("运行容器 \(trimmedImage)") {
+        await perform(
+            "运行容器 \(trimmedImage)",
+            operationDomain: .container,
+            operationTarget: trimmedImage,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["run", "-d"] + (name?.nilIfBlank.map { ["--name", $0] } ?? []) + [trimmedImage] + command)
+        ) {
             try await client.runContainer(name: name?.nilIfBlank, image: trimmedImage, command: command)
         }
     }
@@ -392,7 +408,9 @@ final class RuntimeStore {
         resolvedOptions.image = trimmedImage
         await perform(
             options.createOnly ? "创建容器 \(trimmedImage)" : "运行容器 \(trimmedImage)",
-            operationKey: RuntimeOperationKey.containerRun
+            operationKey: RuntimeOperationKey.containerRun,
+            operationTarget: trimmedImage,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: resolvedOptions.arguments)
         ) {
             try await client.runContainer(resolvedOptions)
         }
@@ -438,7 +456,11 @@ final class RuntimeStore {
     }
 
     func stopContainer(_ id: String) async {
-        await perform("停止容器 \(id)", operationKey: RuntimeOperationKey.containerStop(id)) {
+        await perform(
+            "停止容器 \(id)",
+            operationKey: RuntimeOperationKey.containerStop(id),
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["stop", id])
+        ) {
             try await client.stopContainer(id)
         }
     }
@@ -469,7 +491,11 @@ final class RuntimeStore {
     }
 
     func deleteContainer(_ id: String) async {
-        await perform("删除容器 \(id)", operationKey: RuntimeOperationKey.containerDelete(id)) {
+        await perform(
+            "删除容器 \(id)",
+            operationKey: RuntimeOperationKey.containerDelete(id),
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["delete", id])
+        ) {
             try await client.deleteContainer(id)
         }
     }
@@ -706,7 +732,13 @@ final class RuntimeStore {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let normalizedSize = size?.trimmingCharacters(in: .whitespacesAndNewlines)
-        await perform("创建存储卷 \(trimmed)", operationKey: RuntimeOperationKey.volumeCreate) {
+        let options = VolumeCreateOptions(name: trimmed, size: normalizedSize?.isEmpty == true ? nil : normalizedSize)
+        await perform(
+            "创建存储卷 \(trimmed)",
+            operationKey: RuntimeOperationKey.volumeCreate,
+            operationTarget: trimmed,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: options.arguments)
+        ) {
             try await client.createVolume(name: trimmed, size: normalizedSize?.isEmpty == true ? nil : normalizedSize)
         }
     }
@@ -722,7 +754,12 @@ final class RuntimeStore {
         resolved.name = trimmed
         volumeStatusMessage = nil
         volumeStatusIsError = false
-        await perform("创建存储卷 \(trimmed)", operationKey: RuntimeOperationKey.volumeCreate) {
+        await perform(
+            "创建存储卷 \(trimmed)",
+            operationKey: RuntimeOperationKey.volumeCreate,
+            operationTarget: trimmed,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: resolved.arguments)
+        ) {
             try await client.createVolume(resolved)
         }
     }
@@ -860,7 +897,11 @@ final class RuntimeStore {
     }
 
     func deleteVolume(_ name: String) async {
-        await perform("删除存储卷 \(name)", operationKey: RuntimeOperationKey.volumeDelete(name)) {
+        await perform(
+            "删除存储卷 \(name)",
+            operationKey: RuntimeOperationKey.volumeDelete(name),
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["volume", "delete", name])
+        ) {
             try await client.deleteVolume(name)
         }
     }
@@ -868,7 +909,12 @@ final class RuntimeStore {
     func pruneVolumes() async {
         volumeStatusMessage = nil
         volumeStatusIsError = false
-        await perform("清理未使用卷", operationKey: RuntimeOperationKey.volumePrune) {
+        await perform(
+            "清理未使用卷",
+            operationKey: RuntimeOperationKey.volumePrune,
+            operationTarget: "unused volumes",
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["volume", "prune"])
+        ) {
             _ = try await client.pruneVolumes()
         }
         if errorMessage == nil {
@@ -888,13 +934,22 @@ final class RuntimeStore {
         guard !trimmed.isEmpty else { return }
         var resolved = options
         resolved.name = trimmed
-        await perform("创建网络 \(trimmed)", operationKey: RuntimeOperationKey.networkCreate) {
+        await perform(
+            "创建网络 \(trimmed)",
+            operationKey: RuntimeOperationKey.networkCreate,
+            operationTarget: trimmed,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: resolved.arguments)
+        ) {
             try await client.createNetwork(resolved)
         }
     }
 
     func deleteNetwork(_ name: String) async {
-        await perform("删除网络 \(name)", operationKey: RuntimeOperationKey.networkDelete(name)) {
+        await perform(
+            "删除网络 \(name)",
+            operationKey: RuntimeOperationKey.networkDelete(name),
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["network", "delete", name])
+        ) {
             try await client.deleteNetwork(name)
         }
     }
@@ -915,6 +970,12 @@ final class RuntimeStore {
         errorMessage = nil
         registryStatusMessage = nil
         registryStatusIsError = false
+        let operationID = operationStore?.start(
+            domain: .registry,
+            title: "登录仓库 \(trimmedServer)",
+            target: trimmedServer,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["registry", "login", trimmedServer, "-u", trimmedUsername, "--password-stdin"])
+        )
         defer {
             isRegistryOperationRunning = false
             busyMessage = nil
@@ -926,10 +987,16 @@ final class RuntimeStore {
             if !registryStatusIsError {
                 registryStatusMessage = "已登录仓库 \(registryDisplayName(for: trimmedServer))。"
             }
+            if let operationID {
+                operationStore?.finish(id: operationID, status: .succeeded, output: registryStatusMessage ?? "登录完成。")
+            }
         } catch {
             registryStatusMessage = "登录仓库失败：\(error.localizedDescription)"
             registryStatusIsError = true
             errorMessage = error.localizedDescription
+            if let operationID {
+                operationStore?.finish(id: operationID, status: .failed, output: registryStatusMessage ?? error.localizedDescription)
+            }
         }
     }
 
@@ -939,6 +1006,12 @@ final class RuntimeStore {
         errorMessage = nil
         registryStatusMessage = nil
         registryStatusIsError = false
+        let operationID = operationStore?.start(
+            domain: .registry,
+            title: "退出仓库 \(registry)",
+            target: registry,
+            commandPreview: AppOperationCommandPreview.make(executable: "container", arguments: ["registry", "logout", registry])
+        )
         defer {
             isRegistryOperationRunning = false
             busyMessage = nil
@@ -950,10 +1023,16 @@ final class RuntimeStore {
             if !registryStatusIsError {
                 registryStatusMessage = "已退出仓库 \(registryDisplayName(for: registry))。"
             }
+            if let operationID {
+                operationStore?.finish(id: operationID, status: .succeeded, output: registryStatusMessage ?? "退出完成。")
+            }
         } catch {
             registryStatusMessage = "退出仓库登录失败：\(error.localizedDescription)"
             registryStatusIsError = true
             errorMessage = error.localizedDescription
+            if let operationID {
+                operationStore?.finish(id: operationID, status: .failed, output: registryStatusMessage ?? error.localizedDescription)
+            }
         }
     }
 
@@ -1065,6 +1144,9 @@ final class RuntimeStore {
     private func perform(
         _ message: String,
         operationKey: String? = nil,
+        operationDomain: AppOperationDomain? = nil,
+        operationTarget: String? = nil,
+        commandPreview: String? = nil,
         errorMessage resolvedErrorMessage: ((Error) async -> String)? = nil,
         operation: () async throws -> Void
     ) async -> Bool {
@@ -1072,8 +1154,16 @@ final class RuntimeStore {
             guard activeOperationKey == nil else { return false }
             activeOperationKey = operationKey
         }
+        let operationRecordID = beginOperationRecord(
+            message: message,
+            operationKey: operationKey,
+            operationDomain: operationDomain,
+            operationTarget: operationTarget,
+            commandPreview: commandPreview
+        )
+        let feedbackCommand = commandPreview ?? operationRecordCommandPreview(message: message, operationKey: operationKey)
         busyMessage = message
-        showOperationFeedback(runningOperationMessage(for: message), phase: .running)
+        showOperationFeedback(runningOperationMessage(for: message), phase: .running, commandPreview: feedbackCommand)
         errorMessage = nil
         defer {
             busyMessage = nil
@@ -1084,7 +1174,8 @@ final class RuntimeStore {
         do {
             try await operation()
             await refreshAll()
-            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3)
+            operationStore?.finish(id: operationRecordID, status: .succeeded, output: completedOperationMessage(for: message))
+            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3, commandPreview: feedbackCommand)
             return true
         } catch {
             let resolvedMessage: String
@@ -1095,7 +1186,14 @@ final class RuntimeStore {
             }
             await refreshAll()
             errorMessage = resolvedMessage
-            showOperationFeedback(failedOperationMessage(for: message), phase: .failed, autoDismissAfter: 6)
+            operationStore?.finish(id: operationRecordID, status: .failed, output: resolvedMessage)
+            showOperationFeedback(
+                failedOperationMessage(for: message),
+                phase: .failed,
+                autoDismissAfter: 6,
+                commandPreview: feedbackCommand,
+                failureSummary: resolvedMessage
+            )
             return false
         }
     }
@@ -1109,10 +1207,17 @@ final class RuntimeStore {
     private func showOperationFeedback(
         _ message: String,
         phase: RuntimeOperationFeedback.Phase,
-        autoDismissAfter delay: TimeInterval? = nil
+        autoDismissAfter delay: TimeInterval? = nil,
+        commandPreview: String? = nil,
+        failureSummary: String? = nil
     ) {
         operationFeedbackDismissTask?.cancel()
-        let feedback = RuntimeOperationFeedback(message: message, phase: phase)
+        let feedback = RuntimeOperationFeedback(
+            message: message,
+            phase: phase,
+            commandPreview: commandPreview?.nilIfBlank,
+            failureSummary: failureSummary?.nilIfBlank
+        )
         operationFeedback = feedback
 
         guard let delay, delay > 0 else {
@@ -1132,6 +1237,68 @@ final class RuntimeStore {
                 self.operationFeedback = nil
                 self.operationFeedbackDismissTask = nil
             }
+        }
+    }
+
+    @discardableResult
+    private func beginOperationRecord(
+        message: String,
+        operationKey: String?,
+        operationDomain: AppOperationDomain?,
+        operationTarget: String?,
+        commandPreview: String?
+    ) -> UUID {
+        guard let operationStore else { return UUID() }
+        let domain = operationDomain ?? self.operationDomain(for: operationKey)
+        guard let domain else { return UUID() }
+        return operationStore.start(
+            domain: domain,
+            title: message,
+            target: operationTarget?.nilIfBlank ?? operationTargetText(for: operationKey) ?? "—",
+            commandPreview: commandPreview?.nilIfBlank ?? operationRecordCommandPreview(message: message, operationKey: operationKey)
+        )
+    }
+
+    private func operationDomain(for operationKey: String?) -> AppOperationDomain? {
+        guard let prefix = operationKey?.split(separator: ":", maxSplits: 1).first.map(String.init) else { return nil }
+        switch prefix {
+        case "system": return .system
+        case "container": return .container
+        case "machine": return .machine
+        case "volume": return .volume
+        case "network": return .network
+        case "registry": return .registry
+        case "image": return nil
+        default: return nil
+        }
+    }
+
+    private func operationTargetText(for operationKey: String?) -> String? {
+        guard let operationKey else { return nil }
+        let parts = operationKey.split(separator: ":").map(String.init)
+        guard parts.count > 2 else { return parts.dropFirst().first }
+        return parts.dropFirst(2).joined(separator: ":")
+    }
+
+    private func operationRecordCommandPreview(message: String, operationKey: String?) -> String {
+        guard let operationKey else { return message }
+        let parts = operationKey.split(separator: ":").map(String.init)
+        guard let domain = parts.first, parts.count >= 2 else { return message }
+        switch domain {
+        case "system":
+            return "container system \(parts.dropFirst().first ?? "")".trimmed
+        case "container":
+            return AppOperationCommandPreview.make(executable: "container", arguments: Array(parts.dropFirst()))
+        case "machine":
+            return AppOperationCommandPreview.make(executable: "container", arguments: ["system"] + Array(parts.dropFirst()))
+        case "volume":
+            return AppOperationCommandPreview.make(executable: "container", arguments: ["volume"] + Array(parts.dropFirst()))
+        case "network":
+            return AppOperationCommandPreview.make(executable: "container", arguments: ["network"] + Array(parts.dropFirst()))
+        case "registry":
+            return AppOperationCommandPreview.make(executable: "container", arguments: ["registry"] + Array(parts.dropFirst()))
+        default:
+            return message
         }
     }
 
@@ -1341,8 +1508,29 @@ final class RuntimeStore {
         }
 
         let message = "\(title) \(resolvedIDs.count) 个"
+        let commandPreview = resolvedIDs
+            .map { id in
+                let verb: String
+                if title.hasPrefix("启动") {
+                    verb = "start"
+                } else if title.hasPrefix("停止") {
+                    verb = "stop"
+                } else if title.hasPrefix("重启") {
+                    verb = "restart"
+                } else {
+                    verb = "unknown"
+                }
+                return AppOperationCommandPreview.make(executable: "container", arguments: [verb, id])
+            }
+            .joined(separator: " && ")
+        let operationID = operationStore?.start(
+            domain: .container,
+            title: message,
+            target: resolvedIDs.joined(separator: ", "),
+            commandPreview: commandPreview
+        )
         busyMessage = message
-        showOperationFeedback(runningOperationMessage(for: message), phase: .running)
+        showOperationFeedback(runningOperationMessage(for: message), phase: .running, commandPreview: commandPreview)
         errorMessage = nil
         defer { busyMessage = nil }
 
@@ -1351,13 +1539,20 @@ final class RuntimeStore {
                 try await operation(id)
             }
             await refreshAll()
-            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3)
-            return (true, "\(title)完成：\(resolvedIDs.joined(separator: ", "))")
+            let output = "\(title)完成：\(resolvedIDs.joined(separator: ", "))"
+            if let operationID {
+                operationStore?.finish(id: operationID, status: .succeeded, output: output)
+            }
+            showOperationFeedback(completedOperationMessage(for: message), phase: .succeeded, autoDismissAfter: 3, commandPreview: commandPreview)
+            return (true, output)
         } catch {
             let output = "\(title)失败：\(error.localizedDescription)"
             await refreshAll()
             errorMessage = error.localizedDescription
-            showOperationFeedback(failedOperationMessage(for: title), phase: .failed, autoDismissAfter: 6)
+            if let operationID {
+                operationStore?.finish(id: operationID, status: .failed, output: output)
+            }
+            showOperationFeedback(failedOperationMessage(for: title), phase: .failed, autoDismissAfter: 6, commandPreview: commandPreview, failureSummary: output)
             return (false, output)
         }
     }

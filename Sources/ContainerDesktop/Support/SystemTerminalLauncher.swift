@@ -2,6 +2,20 @@ import AppKit
 import Foundation
 
 enum SystemTerminalLauncher {
+    enum LaunchError: LocalizedError {
+        case selectedTerminalUnavailable(String)
+        case defaultTerminalOpenFailed(URL)
+
+        var errorDescription: String? {
+            switch self {
+            case .selectedTerminalUnavailable(let terminalName):
+                "The selected terminal app is not available: \(terminalName)"
+            case .defaultTerminalOpenFailed(let scriptURL):
+                "Could not open terminal script: \(scriptURL.path)"
+            }
+        }
+    }
+
     static func openDependencyInstallScript(targets: [DependencyInstallTarget]) throws {
         let uniqueTargets = DependencyInstallTarget.allCases.filter { targets.contains($0) }
         guard !uniqueTargets.isEmpty else { return }
@@ -20,7 +34,19 @@ enum SystemTerminalLauncher {
         try openShell(target: .machine(id: id))
     }
 
-    static func openShell(target: TerminalShellTarget) throws {
+    static func openDockerCompatibilityShell(
+        workingDirectory: URL = AppPaths.homeDirectory,
+        terminalApp: SystemTerminalApp? = nil
+    ) throws {
+        let environment = try DockerCompatibilityTerminalService().prepareEnvironment()
+        try openCommandScript(
+            fileName: "containerdesktop-docker-compatible-terminal.command",
+            body: dockerCompatibilityShellScript(workingDirectory: workingDirectory, environment: environment),
+            terminalApp: terminalApp
+        )
+    }
+
+    static func openShell(target: TerminalShellTarget, terminalApp: SystemTerminalApp? = nil) throws {
         try openCommandScript(
             fileName: target.systemTerminalScriptFileName,
             body: """
@@ -34,8 +60,44 @@ enum SystemTerminalLauncher {
               exit 127
             fi
             exec \(target.containerCLIArguments.map(ShellEscaper.singleQuoted).joined(separator: " "))
-            """
+            """,
+            terminalApp: terminalApp
         )
+    }
+
+    static func dockerCompatibilityShellScript(
+        workingDirectory: URL,
+        environment: DockerCompatibilityTerminalEnvironment
+    ) -> String {
+        """
+        #!/bin/zsh
+        clear
+        set -u
+
+        session_zdotdir="$(mktemp -d /tmp/containerdesktop-docker-zdotdir.XXXXXX)"
+        cat > "$session_zdotdir/.zshrc" <<'CONTAINERDESKTOP_ZSHRC'
+        if [ -r "$HOME/.zshrc" ]; then
+          source "$HOME/.zshrc"
+        fi
+
+        export CONTAINERDESKTOP_DOCKER_SHIM_BIN=\(ShellEscaper.singleQuoted(environment.shimBinDirectory.path))
+        case ":$PATH:" in
+          *":$CONTAINERDESKTOP_DOCKER_SHIM_BIN:"*) ;;
+          *) export PATH="$CONTAINERDESKTOP_DOCKER_SHIM_BIN:$PATH" ;;
+        esac
+        export DOCKER_CLI_HINTS=false
+
+        printf '\\033[1;36m%s\\033[0m\\n' "\(AppBranding.displayName) Docker-compatible system terminal"
+        printf 'docker/docker-compose -> container/container-compose\\n'
+        printf 'shim: %s\\n\\n' "$CONTAINERDESKTOP_DOCKER_SHIM_BIN"
+        CONTAINERDESKTOP_ZSHRC
+
+        cd \(ShellEscaper.singleQuoted(workingDirectory.standardizedFileURL.path)) || exit 1
+        ZDOTDIR="$session_zdotdir" /bin/zsh -i
+        exit_code=$?
+        rm -rf "$session_zdotdir"
+        exit "$exit_code"
+        """
     }
 
     private static func dependencyInstallScript(targets: [DependencyInstallTarget]) -> String {
@@ -128,7 +190,11 @@ enum SystemTerminalLauncher {
         """
     }
 
-    private static func openCommandScript(fileName: String, body: String) throws {
+    private static func openCommandScript(
+        fileName: String,
+        body: String,
+        terminalApp: SystemTerminalApp? = nil
+    ) throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ContainerDesktop", isDirectory: true)
             .appendingPathComponent("Terminal", isDirectory: true)
@@ -137,6 +203,26 @@ enum SystemTerminalLauncher {
         let scriptURL = directory.appendingPathComponent(fileName)
         try body.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-        NSWorkspace.shared.open(scriptURL)
+
+        guard let terminalApp,
+              !terminalApp.isSystemDefault
+        else {
+            if !NSWorkspace.shared.open(scriptURL) {
+                throw LaunchError.defaultTerminalOpenFailed(scriptURL)
+            }
+            return
+        }
+
+        guard let appURL = terminalApp.appURL else {
+            throw LaunchError.selectedTerminalUnavailable(terminalApp.displayName)
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: configuration) { _, error in
+            if let error {
+                NSLog("ContainerDesktop failed to open terminal script with %@: %@", terminalApp.displayName, error.localizedDescription)
+            }
+        }
     }
 }

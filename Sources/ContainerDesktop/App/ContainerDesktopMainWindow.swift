@@ -57,17 +57,20 @@ enum ContainerDesktopWindowRouter {
     private static var openSettingsAction: (() -> Void)?
     private static var openDockerCompatibilityTerminalAction: (() -> Void)?
     private static var openDockerCompatibilityTerminalRequestAction: ((DockerCompatibilityTerminalOpenRequest) -> Void)?
+    private static var openDockerCompatibilitySystemTerminalAction: (() -> Void)?
     private static var openDockerCompatibilityTerminalStyleSettingsAction: (() -> Void)?
 
     static func configure(
         openSettings: @escaping () -> Void,
         openDockerCompatibilityTerminal: @escaping () -> Void,
         openDockerCompatibilityTerminalRequest: @escaping (DockerCompatibilityTerminalOpenRequest) -> Void,
+        openDockerCompatibilitySystemTerminal: @escaping () -> Void,
         openDockerCompatibilityTerminalStyleSettings: @escaping () -> Void
     ) {
         openSettingsAction = openSettings
         openDockerCompatibilityTerminalAction = openDockerCompatibilityTerminal
         openDockerCompatibilityTerminalRequestAction = openDockerCompatibilityTerminalRequest
+        openDockerCompatibilitySystemTerminalAction = openDockerCompatibilitySystemTerminal
         openDockerCompatibilityTerminalStyleSettingsAction = openDockerCompatibilityTerminalStyleSettings
     }
 
@@ -84,6 +87,11 @@ enum ContainerDesktopWindowRouter {
     static func openDockerCompatibilityTerminal(request: DockerCompatibilityTerminalOpenRequest) {
         NSApp.activate(ignoringOtherApps: true)
         openDockerCompatibilityTerminalRequestAction?(request)
+    }
+
+    static func openDockerCompatibilitySystemTerminal() {
+        NSApp.activate(ignoringOtherApps: true)
+        openDockerCompatibilitySystemTerminalAction?()
     }
 
     static func openDockerCompatibilityTerminalStyleSettings() {

@@ -5,6 +5,7 @@ struct SystemConfigEditorView: View {
     @AppStorage("containerdesktop.appearance", store: .containerDesktopShared) private var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("containerdesktop.language", store: .containerDesktopShared) private var languageRaw = AppLanguage.system.rawValue
     @Bindable var systemConfigStore: SystemConfigStore
+    @Bindable var launchAtLoginStore: LaunchAtLoginStore
 
     @State private var selectedCategory: ConfigCategory = .general
     @State private var settingsSearch = ""
@@ -20,6 +21,13 @@ struct SystemConfigEditorView: View {
         Binding(
             get: { AppLanguage(rawValue: languageRaw) ?? .system },
             set: { languageRaw = $0.rawValue }
+        )
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLoginStore.isEnabled },
+            set: { launchAtLoginStore.setEnabled($0) }
         )
     }
 
@@ -99,6 +107,7 @@ struct SystemConfigEditorView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .task {
+            launchAtLoginStore.refresh()
             await systemConfigStore.load()
         }
     }
@@ -231,24 +240,99 @@ struct SystemConfigEditorView: View {
     }
 
     private var generalPane: some View {
-        SettingsGroup(title: language.t(.appSettings), subtitle: AppBranding.displayName) {
-            SettingsFormRow(title: language.t(.language), subtitle: "UI language") {
-                ThemedSegmentedPicker(
-                    options: AppLanguage.allCases,
-                    selection: languageBinding,
-                    title: { $0.displayName }
-                )
-                .frame(width: 360)
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsGroup(title: language.t(.appSettings), subtitle: AppBranding.displayName) {
+                SettingsFormRow(title: language.t(.language), subtitle: "UI language") {
+                    ThemedSegmentedPicker(
+                        options: AppLanguage.allCases,
+                        selection: languageBinding,
+                        title: { $0.displayName }
+                    )
+                    .frame(width: 360)
+                }
+
+                SettingsFormRow(title: language.t(.theme), subtitle: "Window appearance") {
+                    ThemedSegmentedPicker(
+                        options: AppearancePreference.allCases,
+                        selection: appearanceBinding,
+                        title: { $0.title(language: language) }
+                    )
+                    .frame(width: 360)
+                }
+
+                SettingsFormRow(title: language.t(.launchAtLogin), subtitle: language.t(.launchAtLoginSubtitle)) {
+                    VStack(alignment: .trailing, spacing: 7) {
+                        HStack(spacing: 8) {
+                            if launchAtLoginStore.isUpdating {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Toggle("", isOn: launchAtLoginBinding)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .disabled(!launchAtLoginStore.canToggle)
+                                .help(launchAtLoginStore.status.message(language: language))
+                        }
+
+                        Label {
+                            Text(launchAtLoginStatusMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        } icon: {
+                            Image(systemName: launchAtLoginStatusImage)
+                                .foregroundStyle(launchAtLoginStatusTint)
+                        }
+                        .frame(maxWidth: 360, alignment: .trailing)
+                    }
+                    .frame(width: 390, alignment: .trailing)
+                }
             }
 
-            SettingsFormRow(title: language.t(.theme), subtitle: "Window appearance") {
-                ThemedSegmentedPicker(
-                    options: AppearancePreference.allCases,
-                    selection: appearanceBinding,
-                    title: { $0.title(language: language) }
-                )
-                .frame(width: 360)
+            SettingsGroup(title: DockerCompatibilityTerminalStrings.systemTerminalTitle(language), subtitle: DockerCompatibilityTerminalStrings.systemTerminalSubtitle(language)) {
+                SystemTerminalSettingsPanel()
+                    .padding(14)
             }
+        }
+    }
+
+    private var launchAtLoginStatusMessage: String {
+        if let errorMessage = launchAtLoginStore.errorMessage {
+            return language.resolved == .zhHans ? "操作失败：\(errorMessage)" : "Update failed: \(errorMessage)"
+        }
+        return "\(launchAtLoginStore.status.title(language: language)) · \(launchAtLoginStore.status.message(language: language))"
+    }
+
+    private var launchAtLoginStatusImage: String {
+        if launchAtLoginStore.errorMessage != nil {
+            return "exclamationmark.triangle"
+        }
+        switch launchAtLoginStore.status {
+        case .enabled:
+            return "checkmark.circle"
+        case .notRegistered:
+            return "power"
+        case .requiresApproval:
+            return "exclamationmark.triangle"
+        case .unavailable, .unknown:
+            return "slash.circle"
+        }
+    }
+
+    private var launchAtLoginStatusTint: Color {
+        if launchAtLoginStore.errorMessage != nil {
+            return CDTheme.ember
+        }
+        switch launchAtLoginStore.status {
+        case .enabled:
+            return CDTheme.lime
+        case .notRegistered:
+            return .secondary
+        case .requiresApproval:
+            return CDTheme.ember
+        case .unavailable, .unknown:
+            return .secondary
         }
     }
 

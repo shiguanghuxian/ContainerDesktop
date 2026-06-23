@@ -1,9 +1,11 @@
 import SwiftUI
+import AppKit
 
 struct OperationToast: View {
     @Environment(\.appLanguage) private var language
     var feedback: RuntimeOperationFeedback
     var onDismiss: () -> Void
+    var onOpenDetails: () -> Void = {}
 
     private var tint: Color {
         switch feedback.phase {
@@ -45,6 +47,40 @@ struct OperationToast: View {
             }
 
             Spacer(minLength: 16)
+
+            HStack(spacing: 8) {
+                if let command = feedback.commandPreview?.nilIfBlank {
+                    Button {
+                        copy(command)
+                    } label: {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .help(language.resolved == .zhHans ? "复制命令" : "Copy command")
+                }
+
+                if let summary = feedback.failureSummary?.nilIfBlank {
+                    Button {
+                        copy(summary)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .help(language.resolved == .zhHans ? "复制失败摘要" : "Copy failure summary")
+                }
+
+                Button {
+                    onOpenDetails()
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help(language.resolved == .zhHans ? "查看操作历史" : "View operation history")
+            }
+            .foregroundStyle(.secondary)
 
             if feedback.phase != .running {
                 Button(action: onDismiss) {
@@ -92,5 +128,10 @@ struct OperationToast: View {
                     .foregroundStyle(tint)
             }
         }
+    }
+
+    private func copy(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }

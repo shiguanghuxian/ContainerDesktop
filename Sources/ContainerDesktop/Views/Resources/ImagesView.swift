@@ -19,6 +19,7 @@ private struct ImageDeleteRequest: Identifiable {
 
 private enum ImageReferenceSelectionAction: Hashable {
     case openDetail
+    case run
     case tag
     case push
     case export
@@ -37,6 +38,7 @@ struct ImagesView: View {
     @AppStorage(ImageListDisplayMode.defaultsKey, store: .containerDesktopShared) private var imageListDisplayModeRaw = ImageListDisplayMode.tags.rawValue
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var operationStore: AppOperationStore
+    @Binding var resourceRoute: AppResourceRoute?
     @State private var searchText = ""
     @State private var selectedRegistryFilter = ImageRegistryFilterOption.allID
     @State private var pullReference = "alpine:latest"
@@ -87,6 +89,16 @@ struct ImagesView: View {
     @State private var drawerSelection: ImageDrawerSelection?
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var referenceSelectionRequest: ImageReferenceSelectionRequest?
+
+    init(
+        runtimeStore: RuntimeStore,
+        operationStore: AppOperationStore,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
+    ) {
+        self.runtimeStore = runtimeStore
+        self.operationStore = operationStore
+        _resourceRoute = resourceRoute
+    }
 
     private var imageListDisplayMode: ImageListDisplayMode {
         ImageListDisplayMode(rawValue: imageListDisplayModeRaw) ?? .tags
@@ -204,7 +216,8 @@ struct ImagesView: View {
                                 drawerSelection = nil
                             }
                         }
-                    )
+                    ),
+                    resourceRoute: $resourceRoute
                 )
             } else {
                 DrawerPageLayout(
@@ -242,6 +255,12 @@ struct ImagesView: View {
         }
         .onChange(of: runtimeStore.registries.map(\.server)) { _, _ in
             pruneSelectedRegistryFilter()
+        }
+        .onAppear {
+            consumeResourceRoute()
+        }
+        .onChange(of: resourceRoute) { _, route in
+            consumeResourceRoute(route)
         }
         .confirmationDialog(
             referenceSelectionRequest?.title ?? "",
@@ -497,6 +516,8 @@ struct ImagesView: View {
                 openEntryDrawer(entry)
             }
             ImageRowMoreMenu(isDisabled: isOperationBlocked) {
+                requestImageAction(.run, for: entry)
+            } onTag: {
                 requestImageAction(.tag, for: entry)
             } onPush: {
                 requestImageAction(.push, for: entry)
@@ -594,6 +615,8 @@ struct ImagesView: View {
         switch action {
         case .openDetail:
             selectImage(image)
+        case .run:
+            runImage(image)
         case .tag:
             prepareTagImage(image)
         case .push:
@@ -605,11 +628,39 @@ struct ImagesView: View {
         }
     }
 
+    private func consumeResourceRoute(_ route: AppResourceRoute? = nil) {
+        let route = route ?? resourceRoute
+        switch route {
+        case .image(let reference, _):
+            detailReference = reference
+            drawerSelection = nil
+            resourceRoute = nil
+        case .imageTag(let reference):
+            detailReference = nil
+            drawerSelection = nil
+            prepareTagImage(reference: reference)
+            resourceRoute = nil
+        case .imagePush(let reference):
+            detailReference = nil
+            drawerSelection = nil
+            preparePushImage(reference: reference)
+            resourceRoute = nil
+        case .imageTasks:
+            drawerSelection = .tasks
+            detailReference = nil
+            resourceRoute = nil
+        default:
+            break
+        }
+    }
+
     private func referenceSelectionTitle(action: ImageReferenceSelectionAction, group: ImageRepositoryGroup) -> String {
         let actionTitle: String
         switch action {
         case .openDetail:
             actionTitle = language.resolved == .zhHans ? "打开镜像详情" : "Open image details"
+        case .run:
+            actionTitle = language.resolved == .zhHans ? "运行镜像" : "Run image"
         case .tag:
             actionTitle = language.resolved == .zhHans ? "标记镜像" : "Tag image"
         case .push:
@@ -1310,14 +1361,28 @@ struct ImagesView: View {
     }
 
     private func prepareTagImage(_ image: ImageSummary) {
-        tagSource = image.reference
-        tagTarget = suggestedTagTarget(for: image.reference)
+        prepareTagImage(reference: image.reference)
+    }
+
+    private func prepareTagImage(reference: String) {
+        tagSource = reference
+        tagTarget = suggestedTagTarget(for: reference)
         showTagPopover = true
     }
 
     private func preparePushImage(_ image: ImageSummary) {
-        pushReference = image.reference
+        preparePushImage(reference: image.reference)
+    }
+
+    private func preparePushImage(reference: String) {
+        pushReference = reference
         showPushPopover = true
+    }
+
+    private func runImage(_ image: ImageSummary) {
+        Task {
+            await runtimeStore.runContainer(options: ContainerRunOptions(image: image.reference))
+        }
     }
 
     private func prepareSaveImage(_ image: ImageSummary) {
@@ -1653,12 +1718,18 @@ private struct ImageToolbarMenuButton: View {
 private struct ImageRowMoreMenu: View {
     @Environment(\.appLanguage) private var language
     var isDisabled: Bool
+    var onRun: () -> Void
     var onTag: () -> Void
     var onPush: () -> Void
     var onExport: () -> Void
 
     var body: some View {
         Menu {
+            Button {
+                onRun()
+            } label: {
+                Label(language.resolved == .zhHans ? "运行" : "Run", systemImage: "play.circle")
+            }
             Button {
                 onTag()
             } label: {

@@ -4,6 +4,8 @@ import SwiftUI
 struct ContainerLogsTabView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var store: ContainerDetailStore
+    @State private var isLogViewAtBottom = true
+    @State private var scrollToBottomRequestID = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -18,16 +20,23 @@ struct ContainerLogsTabView: View {
             ReadOnlyMonospaceTextView(
                 text: store.filteredLogsText.isEmpty ? "无输出。" : store.filteredLogsText,
                 appearance: .console,
-                autoScrollToBottom: true,
+                autoScrollToBottom: shouldAutoFollowLogs,
+                scrollToBottomRequestID: scrollToBottomRequestID,
+                isScrolledToBottom: $isLogViewAtBottom,
                 wrapsLines: false
             )
-            .frame(minHeight: 480)
+            .frame(height: 480)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(CDTheme.cyan.opacity(0.20))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var shouldAutoFollowLogs: Bool {
+        store.followLogs && !store.isLogsPaused && store.logsSearchText.trimmed.isEmpty
     }
 
     private var toolbar: some View {
@@ -95,6 +104,15 @@ struct ContainerLogsTabView: View {
 
     private var actionButtons: some View {
         HStack(spacing: 8) {
+            if !isLogViewAtBottom {
+                Button {
+                    scrollToBottomRequestID += 1
+                } label: {
+                    Image(systemName: "arrow.down.to.line")
+                }
+                .help(language.resolved == .zhHans ? "滚动到底部" : "Scroll to bottom")
+            }
+
             Button {
                 copy(store.filteredLogsText)
             } label: {

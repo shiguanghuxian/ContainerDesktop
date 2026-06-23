@@ -12,7 +12,9 @@ enum ComposeParser {
         let services = parseServices(root["services"] as? [String: Any] ?? [:])
         let volumes = Array((root["volumes"] as? [String: Any] ?? [:]).keys).sorted()
         let networks = Array((root["networks"] as? [String: Any] ?? [:]).keys).sorted()
-        let name = root["name"] as? String ?? fileURL.deletingPathExtension().lastPathComponent
+        let name = (root["name"] as? String)?.nilIfBlank
+            ?? fileURL.deletingLastPathComponent().lastPathComponent.nilIfBlank
+            ?? fileURL.deletingPathExtension().lastPathComponent
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let modified = (attributes[.modificationDate] as? Date) ?? Date()
 
@@ -42,6 +44,7 @@ enum ComposeParser {
             return ComposeProject.Service(
                 name: name,
                 image: image,
+                containerName: (service["container_name"] as? String)?.nilIfBlank,
                 buildContext: buildContext,
                 command: parseStringArray(service["command"]),
                 ports: parseStringArray(service["ports"]),

@@ -48,6 +48,8 @@ private enum VolumeSortOption: String, CaseIterable, Identifiable {
 struct VolumesView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
+    @Bindable var operationStore: AppOperationStore
+    @Binding var resourceRoute: AppResourceRoute?
     @State private var searchText = ""
     @State private var kindFilter: VolumeKindFilter = .all
     @State private var sortOption: VolumeSortOption = .name
@@ -66,6 +68,16 @@ struct VolumesView: View {
     @State private var cloneVolumeSize = ""
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var isConfirmingPrune = false
+
+    init(
+        runtimeStore: RuntimeStore,
+        operationStore: AppOperationStore,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
+    ) {
+        self.runtimeStore = runtimeStore
+        self.operationStore = operationStore
+        _resourceRoute = resourceRoute
+    }
 
     private var filteredVolumes: [VolumeSummary] {
         let query = searchText.trimmed.lowercased()
@@ -147,9 +159,11 @@ struct VolumesView: View {
             if let detailName {
                 VolumeDetailPage(
                     runtimeStore: runtimeStore,
+                    operationStore: operationStore,
                     name: detailName,
                     initialTab: detailInitialTab,
-                    isPresented: isDetailPresented
+                    isPresented: isDetailPresented,
+                    resourceRoute: $resourceRoute
                 )
             } else {
                 DrawerPageLayout(isDrawerPresented: selectedVolume != nil, onDismiss: {
@@ -176,6 +190,12 @@ struct VolumesView: View {
                     }
                 }
             }
+        }
+        .onAppear {
+            consumeResourceRoute()
+        }
+        .onChange(of: resourceRoute) { _, route in
+            consumeResourceRoute(route)
         }
         .alert("删除存储卷？", isPresented: Binding(
             get: { pendingDelete != nil },
@@ -231,6 +251,15 @@ struct VolumesView: View {
                 }
             )
         }
+    }
+
+    private func consumeResourceRoute(_ route: AppResourceRoute? = nil) {
+        let route = route ?? resourceRoute
+        guard case .volume(let name, let tab) = route else { return }
+        selectedName = nil
+        detailInitialTab = tab ?? .overview
+        detailName = name
+        resourceRoute = nil
     }
 
     private var pageContent: some View {

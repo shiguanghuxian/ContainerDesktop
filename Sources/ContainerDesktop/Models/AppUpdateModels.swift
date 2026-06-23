@@ -85,15 +85,137 @@ struct AppUpdateAsset: Hashable, Sendable {
     }
 }
 
+struct AppUpdateReleaseNotes: Hashable, Sendable {
+    var english: String
+    var simplifiedChinese: String
+
+    init(english: String = "", simplifiedChinese: String = "") {
+        self.english = english
+        self.simplifiedChinese = simplifiedChinese
+    }
+
+    init(legacy text: String) {
+        if let split = Self.splitLegacyMarkdown(text) {
+            self = split
+        } else {
+            self.init(english: text, simplifiedChinese: "")
+        }
+    }
+
+    func text(for language: AppLanguage) -> String {
+        let englishText = english.trimmed
+        let chineseText = simplifiedChinese.trimmed
+        if language.resolved == .zhHans, !chineseText.isEmpty {
+            return chineseText
+        }
+        if !englishText.isEmpty {
+            return englishText
+        }
+        return chineseText
+    }
+
+    static func resolved(
+        english: String?,
+        simplifiedChinese: String?,
+        legacy: String?
+    ) -> AppUpdateReleaseNotes {
+        let legacyText = legacy?.nilIfBlank
+        let splitLegacy = legacyText.flatMap(splitLegacyMarkdown)
+        return AppUpdateReleaseNotes(
+            english: english?.nilIfBlank ?? splitLegacy?.english.nilIfBlank ?? legacyText ?? "",
+            simplifiedChinese: simplifiedChinese?.nilIfBlank ?? splitLegacy?.simplifiedChinese.nilIfBlank ?? ""
+        )
+    }
+
+    private static func splitLegacyMarkdown(_ text: String) -> AppUpdateReleaseNotes? {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
+        guard let chineseIndex = lines.firstIndex(where: { $0.trimmed == "中文" }),
+              let englishIndex = lines.firstIndex(where: { $0.trimmed.caseInsensitiveCompare("English") == .orderedSame })
+        else {
+            return nil
+        }
+
+        let firstMarkerIndex = min(chineseIndex, englishIndex)
+        let sharedPrefix = lines[..<firstMarkerIndex].joined(separator: "\n").trimmed
+        let chineseBody = sectionBody(lines: lines, markerIndex: chineseIndex, otherMarkerIndex: englishIndex)
+        let englishBody = sectionBody(lines: lines, markerIndex: englishIndex, otherMarkerIndex: chineseIndex)
+
+        return AppUpdateReleaseNotes(
+            english: joinedNotes(prefix: sharedPrefix, body: englishBody),
+            simplifiedChinese: joinedNotes(prefix: sharedPrefix, body: chineseBody)
+        )
+    }
+
+    private static func sectionBody(
+        lines: [String],
+        markerIndex: Int,
+        otherMarkerIndex: Int
+    ) -> String {
+        let start = markerIndex + 1
+        let end = otherMarkerIndex > markerIndex ? otherMarkerIndex : lines.count
+        guard start < end else { return "" }
+        return lines[start..<end].joined(separator: "\n").trimmed
+    }
+
+    private static func joinedNotes(prefix: String, body: String) -> String {
+        [prefix.nilIfBlank, body.nilIfBlank]
+            .compactMap(\.self)
+            .joined(separator: "\n\n")
+    }
+}
+
 struct AppUpdateRelease: Hashable, Sendable {
     var version: SemanticVersion
     var versionText: String
     var tagName: String
     var title: String
     var publishedAt: Date?
-    var releaseNotes: String
+    var releaseNotes: AppUpdateReleaseNotes
     var htmlURL: URL?
     var assets: [AppUpdateAsset]
+
+    init(
+        version: SemanticVersion,
+        versionText: String,
+        tagName: String,
+        title: String,
+        publishedAt: Date?,
+        releaseNotes: AppUpdateReleaseNotes,
+        htmlURL: URL?,
+        assets: [AppUpdateAsset]
+    ) {
+        self.version = version
+        self.versionText = versionText
+        self.tagName = tagName
+        self.title = title
+        self.publishedAt = publishedAt
+        self.releaseNotes = releaseNotes
+        self.htmlURL = htmlURL
+        self.assets = assets
+    }
+
+    init(
+        version: SemanticVersion,
+        versionText: String,
+        tagName: String,
+        title: String,
+        publishedAt: Date?,
+        releaseNotes: String,
+        htmlURL: URL?,
+        assets: [AppUpdateAsset]
+    ) {
+        self.init(
+            version: version,
+            versionText: versionText,
+            tagName: tagName,
+            title: title,
+            publishedAt: publishedAt,
+            releaseNotes: AppUpdateReleaseNotes(legacy: releaseNotes),
+            htmlURL: htmlURL,
+            assets: assets
+        )
+    }
 
     func compatibleAsset(for architecture: AppUpdateArchitecture) -> AppUpdateAsset? {
         assets
@@ -140,7 +262,11 @@ struct AppUpdatePackage: Hashable, Sendable {
     }
 
     var releaseNotes: String {
-        release.releaseNotes.trimmed
+        releaseNotes(for: .en)
+    }
+
+    func releaseNotes(for language: AppLanguage) -> String {
+        release.releaseNotes.text(for: language).trimmed
     }
 }
 

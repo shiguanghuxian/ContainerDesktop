@@ -5,7 +5,7 @@ import Observation
 @Observable
 final class DockerCompatibilityTerminalTab: Identifiable {
     let id: UUID
-    let title: String
+    let fallbackTitle: String
     let store: DockerCompatibilityTerminalStore
 
     init(
@@ -14,8 +14,20 @@ final class DockerCompatibilityTerminalTab: Identifiable {
         store: DockerCompatibilityTerminalStore
     ) {
         self.id = id
-        self.title = title
+        self.fallbackTitle = title
         self.store = store
+    }
+
+    var title: String {
+        if let shellTarget {
+            return shellTarget.tabTitle
+        }
+
+        let pathComponent = store.workingDirectory.standardizedFileURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pathComponent.isEmpty {
+            return pathComponent
+        }
+        return fallbackTitle
     }
 
     var workingDirectory: URL {

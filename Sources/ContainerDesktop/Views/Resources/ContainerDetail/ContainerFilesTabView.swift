@@ -23,6 +23,7 @@ struct ContainerFilesTabView: View {
 
             responsiveFileBrowser
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             pathDraft = store.filePath
         }

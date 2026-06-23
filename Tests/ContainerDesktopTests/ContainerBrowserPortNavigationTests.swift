@@ -16,7 +16,26 @@ struct ContainerBrowserPortNavigationTests {
         #expect(header.contains("ContainerBrowserPortTarget.portSummary(from: inspectText)"))
         #expect(common.contains("struct ContainerBrowserPortMenuButton"))
         #expect(common.contains("struct ContainerBrowserPortInlineMenuButton"))
-        #expect(common.contains("NSWorkspace.shared.open(target.url)"))
+        #expect(common.contains("NSWorkspace.shared.open(url)"))
+        #expect(common.contains("NSPasteboard.general.setString(value, forType: .string)"))
+        #expect(common.contains("Section"))
+        #expect(common.contains("menuTargets(for: .host)"))
+        #expect(common.contains("menuTargets(for: .container)"))
+        #expect(common.contains("打开网站或复制端口连接信息"))
+        #expect(common.contains("Port Actions"))
+
+        let quickActions = try source("Sources/ContainerDesktop/Models/ContainerPortQuickActions.swift")
+        #expect(quickActions.contains("enum ContainerPortQuickActionKind"))
+        #expect(quickActions.contains("copyURL"))
+        #expect(quickActions.contains("copyConnectionString"))
+        #expect(quickActions.contains("copyEnvironmentSnippet"))
+        #expect(quickActions.contains("copyCLICommand"))
+        #expect(quickActions.contains("copyHealthCheckCommand"))
+        #expect(quickActions.contains("curl -fsS"))
+        #expect(quickActions.contains("nc -vz"))
+        #expect(quickActions.contains("PostgreSQL"))
+        #expect(quickActions.contains("RabbitMQ"))
+        #expect(quickActions.contains("MinIO"))
 
         let actionButtons = try section(
             in: header,

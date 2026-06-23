@@ -268,6 +268,8 @@ struct AppUpdateManifest: Decodable {
     var title: String?
     var name: String?
     var publishedAt: String?
+    var releaseNotesEN: String?
+    var releaseNotesZHHans: String?
     var releaseNotes: String?
     var body: String?
     var htmlURL: URL?
@@ -283,6 +285,8 @@ struct AppUpdateManifest: Decodable {
         case name
         case publishedAt
         case publishedAtSnake = "published_at"
+        case releaseNotesEN = "release_notes_en"
+        case releaseNotesZHHans = "release_notes_zh_hans"
         case releaseNotes
         case releaseNotesSnake = "release_notes"
         case body
@@ -301,6 +305,8 @@ struct AppUpdateManifest: Decodable {
         name = try container.decodeIfPresent(String.self, forKey: .name)
         publishedAt = try container.decodeIfPresent(String.self, forKey: .publishedAt)
             ?? container.decodeIfPresent(String.self, forKey: .publishedAtSnake)
+        releaseNotesEN = try container.decodeIfPresent(String.self, forKey: .releaseNotesEN)
+        releaseNotesZHHans = try container.decodeIfPresent(String.self, forKey: .releaseNotesZHHans)
         releaseNotes = try container.decodeIfPresent(String.self, forKey: .releaseNotes)
             ?? container.decodeIfPresent(String.self, forKey: .releaseNotesSnake)
         body = try container.decodeIfPresent(String.self, forKey: .body)
@@ -335,7 +341,11 @@ struct AppUpdateManifest: Decodable {
             tagName: resolvedTag,
             title: resolvedTitle,
             publishedAt: Self.date(from: publishedAt),
-            releaseNotes: releaseNotes ?? body ?? "",
+            releaseNotes: AppUpdateReleaseNotes.resolved(
+                english: releaseNotesEN,
+                simplifiedChinese: releaseNotesZHHans,
+                legacy: releaseNotes ?? body
+            ),
             htmlURL: htmlURL ?? releaseURL,
             assets: assets
         )

@@ -1,6 +1,6 @@
 import Foundation
 
-enum ObservabilityLogSource: String, CaseIterable, Identifiable, Hashable, Sendable {
+enum ObservabilityLogSource: String, CaseIterable, Identifiable, Codable, Hashable, Sendable {
     case containerStdio
     case containerBoot
     case system
@@ -106,7 +106,7 @@ struct ObservabilityStatsSummary: Hashable, Sendable {
     }
 }
 
-enum ObservabilityComposeScope: Hashable, Identifiable, Sendable {
+enum ObservabilityComposeScope: Hashable, Identifiable, Codable, Sendable {
     case all
     case project(String)
     case service(projectID: String, serviceName: String)

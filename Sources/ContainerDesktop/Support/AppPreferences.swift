@@ -8,6 +8,7 @@ extension UserDefaults {
             "containerdesktop.language",
             "containerdesktop.dockerCompatibilityTerminal.style",
             "containerdesktop.dockerCompatibilityTerminal.outputEventLimit",
+            "containerdesktop.dockerCompatibilityTerminal.systemTerminalAppBundleID",
         ] where defaults.object(forKey: key) == nil {
             if let existingValue = UserDefaults.standard.object(forKey: key) {
                 defaults.set(existingValue, forKey: key)
@@ -205,6 +206,8 @@ enum L10nKey {
     case kernel
     case runtime
     case appSettings
+    case launchAtLogin
+    case launchAtLoginSubtitle
     case containerDefaults
     case builder
     case machine
@@ -339,6 +342,8 @@ extension L10nKey {
         case .kernel: "内核"
         case .runtime: "运行时"
         case .appSettings: "应用设置"
+        case .launchAtLogin: "开机自动启动"
+        case .launchAtLoginSubtitle: "登录 macOS 后自动运行软件"
         case .containerDefaults: "容器默认值"
         case .builder: "构建器"
         case .machine: "虚拟机"
@@ -473,6 +478,8 @@ extension L10nKey {
         case .kernel: "Kernel"
         case .runtime: "Runtime"
         case .appSettings: "App Settings"
+        case .launchAtLogin: "Launch at Login"
+        case .launchAtLoginSubtitle: "Open the app automatically after macOS login"
         case .containerDefaults: "Container Defaults"
         case .builder: "Builder"
         case .machine: "Machine"

@@ -239,12 +239,42 @@ arch = os.environ["ARCH"]
 name = zip_path.name
 release_notes = pathlib.Path(os.environ["RELEASE_NOTES_PATH"]).read_text(encoding="utf-8")
 
+def split_release_notes(text):
+    normalized = text.replace("\r\n", "\n")
+    lines = normalized.split("\n")
+    chinese_index = next((index for index, line in enumerate(lines) if line.strip() == "中文"), None)
+    english_index = next((index for index, line in enumerate(lines) if line.strip().lower() == "english"), None)
+    if chinese_index is None or english_index is None:
+        fallback = normalized.strip()
+        return fallback, ""
+
+    first_marker_index = min(chinese_index, english_index)
+    prefix = "\n".join(lines[:first_marker_index]).strip()
+
+    def section_body(marker_index, other_marker_index):
+        start = marker_index + 1
+        end = other_marker_index if other_marker_index > marker_index else len(lines)
+        return "\n".join(lines[start:end]).strip()
+
+    def joined(prefix_text, body_text):
+        parts = [part for part in [prefix_text, body_text] if part]
+        return "\n\n".join(parts)
+
+    return (
+        joined(prefix, section_body(english_index, chinese_index)),
+        joined(prefix, section_body(chinese_index, english_index)),
+    )
+
+release_notes_en, release_notes_zh_hans = split_release_notes(release_notes)
+
 payload = {
     "version": os.environ["VERSION"],
     "tag_name": os.environ["RELEASE_TAG"],
     "title": f"ContainerDesktop {os.environ['VERSION']}",
     "published_at": os.environ["PUBLISHED_AT"],
-    "release_notes": release_notes,
+    "release_notes": release_notes_en,
+    "release_notes_en": release_notes_en,
+    "release_notes_zh_hans": release_notes_zh_hans,
     "html_url": os.environ["RELEASE_PAGE_URL"],
     "assets": {
         arch: {

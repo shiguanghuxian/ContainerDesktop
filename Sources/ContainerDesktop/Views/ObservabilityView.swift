@@ -20,6 +20,11 @@ struct ObservabilityView: View {
     @State private var showResourceDrawer = false
     @State private var resourceSampleScopeKey = ""
     @State private var liveLogStore = GlobalLogStreamStore()
+    @State private var logPresets: [ObservabilityLogPreset] = ObservabilityLogPresetPersistence.load()
+    @State private var logRegexEnabled = false
+    @State private var logCaseSensitive = false
+    @State private var logErrorOnly = false
+    @State private var logSoftWrap = true
 
     private var scopedContainers: [ContainerSummary] {
         let composeScoped = composeScope.containers(from: runtimeStore.containers, projects: composeStore.projects)
@@ -47,15 +52,38 @@ struct ObservabilityView: View {
     }
 
     private func filteredLogText(_ raw: String) -> String {
-        let query = logFilterText.trimmed.lowercased()
-        guard !query.isEmpty else { return raw }
+        let query = logFilterText.trimmed
         let lines = raw
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
             .filter { line in
-                line.lowercased().contains(query) || line.hasPrefix("[")
+                matchesLogLine(line, query: query)
             }
         return lines.isEmpty ? (language.resolved == .zhHans ? "没有匹配的日志。" : "No matching log lines.") : lines.joined(separator: "\n")
+    }
+
+    private func matchesLogLine(_ line: String, query: String) -> Bool {
+        if line.hasPrefix("[") || line.hasPrefix(AppBranding.logPrefix) || line.hasPrefix(AppBranding.legacyLogPrefix) {
+            return true
+        }
+        if logErrorOnly, !isErrorLogLine(line) {
+            return false
+        }
+        guard !query.isEmpty else { return true }
+        if logRegexEnabled, let regex = try? Regex(query) {
+            return line.firstMatch(of: regex) != nil
+        }
+        if logCaseSensitive {
+            return line.contains(query)
+        }
+        return line.localizedCaseInsensitiveContains(query)
+    }
+
+    private func isErrorLogLine(_ line: String) -> Bool {
+        let text = line.lowercased()
+        return ["error", "failed", "failure", "fatal", "panic", "exception", "denied", "refused", "错误", "失败"].contains {
+            text.contains($0)
+        }
     }
 
     private var statsSummary: ObservabilityStatsSummary {
@@ -271,6 +299,36 @@ struct ObservabilityView: View {
                 Label(language.resolved == .zhHans ? "导出" : "Export", systemImage: "square.and.arrow.up")
             }
             .help(language.resolved == .zhHans ? "导出当前日志" : "Export current logs")
+
+            Button {
+                copyLogs()
+            } label: {
+                Label(language.resolved == .zhHans ? "复制" : "Copy", systemImage: "doc.on.doc")
+            }
+            .help(language.resolved == .zhHans ? "复制当前过滤日志" : "Copy filtered logs")
+
+            Menu {
+                Button {
+                    saveCurrentLogPreset()
+                } label: {
+                    Label(language.resolved == .zhHans ? "保存当前预设" : "Save Current Preset", systemImage: "plus")
+                }
+                Divider()
+                if logPresets.isEmpty {
+                    Text(language.resolved == .zhHans ? "暂无预设" : "No presets")
+                } else {
+                    ForEach(logPresets) { preset in
+                        Button {
+                            applyLogPreset(preset)
+                        } label: {
+                            Label(preset.name, systemImage: "line.3.horizontal.decrease.circle")
+                        }
+                    }
+                }
+            } label: {
+                Label(language.resolved == .zhHans ? "预设" : "Presets", systemImage: "line.3.horizontal.decrease.circle")
+            }
+            .help(language.resolved == .zhHans ? "保存或应用日志过滤预设" : "Save or apply log presets")
         }
     }
 
@@ -341,6 +399,8 @@ struct ObservabilityView: View {
 
     private var logsPanel: some View {
         PanelView(title: language.t(.logs), subtitle: logPanelSubtitle, systemImage: "doc.plaintext") {
+            logOptionsBar
+                .padding(.bottom, 8)
             if liveLogStore.isStreaming || liveLogStore.isStarting {
                 StatusBanner(
                     text: liveLogStatusText,
@@ -354,8 +414,26 @@ struct ObservabilityView: View {
             }
             TerminalBlock(
                 text: visibleLogsText.nilIfBlank ?? (language.resolved == .zhHans ? "点击刷新加载日志。" : "Refresh to load logs."),
-                minHeight: 440
+                minHeight: 440,
+                softWrap: logSoftWrap
             )
+        }
+    }
+
+    private var logOptionsBar: some View {
+        HStack(spacing: 10) {
+            Toggle(language.resolved == .zhHans ? "错误" : "Errors", isOn: $logErrorOnly)
+                .toggleStyle(.switch)
+            Toggle("Regex", isOn: $logRegexEnabled)
+                .toggleStyle(.switch)
+            Toggle(language.resolved == .zhHans ? "大小写" : "Case", isOn: $logCaseSensitive)
+                .toggleStyle(.switch)
+            Toggle(language.resolved == .zhHans ? "换行" : "Wrap", isOn: $logSoftWrap)
+                .toggleStyle(.switch)
+            Spacer()
+            Text(language.resolved == .zhHans ? "\(visibleLogsText.split(separator: "\n").count) 行" : "\(visibleLogsText.split(separator: "\n").count) lines")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -454,6 +532,51 @@ struct ObservabilityView: View {
         } catch {
             runtimeStore.errorMessage = error.localizedDescription
         }
+    }
+
+    private func copyLogs() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(visibleLogsText, forType: .string)
+    }
+
+    private func saveCurrentLogPreset() {
+        let name = "\(composeScopeTitle(composeScope)) · \(Date().formatted(date: .omitted, time: .shortened))"
+        let preset = ObservabilityLogPreset(
+            name: name,
+            searchText: searchText,
+            filterText: logFilterText,
+            logSource: logSource,
+            logLines: logLines,
+            systemLogLast: systemLogLast,
+            composeScope: composeScope,
+            onlyRunning: onlyRunning,
+            autoRefresh: autoRefresh,
+            refreshInterval: refreshInterval,
+            regexEnabled: logRegexEnabled,
+            caseSensitive: logCaseSensitive,
+            errorOnly: logErrorOnly,
+            softWrap: logSoftWrap
+        )
+        logPresets.removeAll { $0.name == preset.name }
+        logPresets.insert(preset, at: 0)
+        ObservabilityLogPresetPersistence.save(logPresets)
+    }
+
+    private func applyLogPreset(_ preset: ObservabilityLogPreset) {
+        searchText = preset.searchText
+        logFilterText = preset.filterText
+        logSource = preset.logSource
+        logLines = preset.logLines
+        systemLogLast = preset.systemLogLast
+        composeScope = preset.composeScope
+        onlyRunning = preset.onlyRunning
+        autoRefresh = preset.autoRefresh
+        refreshInterval = preset.refreshInterval
+        logRegexEnabled = preset.regexEnabled
+        logCaseSensitive = preset.caseSensitive
+        logErrorOnly = preset.errorOnly
+        logSoftWrap = preset.softWrap
+        refresh()
     }
 }
 

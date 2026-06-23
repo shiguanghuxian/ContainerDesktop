@@ -77,8 +77,10 @@ struct ContainerStatsTabView: View {
                         selectedSample: $selectedSample
                     )
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func toolbar(displaySample: ContainerStatsSample?, sampleCount: Int) -> some View {

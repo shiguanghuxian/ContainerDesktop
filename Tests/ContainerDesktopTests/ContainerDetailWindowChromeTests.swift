@@ -42,6 +42,29 @@ struct ContainerDetailWindowChromeTests {
         #expect(headerSource.contains("ViewThatFits(in: .horizontal)"))
     }
 
+    @Test("container detail uses shared page scrolling")
+    func containerDetailUsesSharedPageScrolling() throws {
+        let containerDetailSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Resources/ContainerDetailPage.swift",
+            encoding: .utf8
+        )
+        let chromeSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Common/SecondaryPageChrome.swift",
+            encoding: .utf8
+        )
+
+        #expect(containerDetailSource.contains("SecondaryDetailPageContainer"))
+        #expect(!containerDetailSource.contains("GeometryReader { proxy in"))
+        #expect(containerDetailSource.contains("fixedTopContent(container: container)"))
+        #expect(containerDetailSource.contains(".frame(maxWidth: .infinity, alignment: .topLeading)"))
+        #expect(!containerDetailSource.contains(".frame(width: proxy.size.width, height: proxy.size.height"))
+        #expect(!containerDetailSource.contains("maxHeight: .infinity"))
+        #expect(!containerDetailSource.contains(".layoutPriority(1)"))
+        #expect(!containerDetailSource.contains(".clipped()"))
+        #expect(chromeSource.contains("ScrollView {"))
+        #expect(!chromeSource.contains("NestedScrollWheelRouter()"))
+    }
+
     @Test("top bar remains full width above detail content")
     func topBarRemainsFullWidthAboveDetailContent() throws {
         let chromeSource = try String(

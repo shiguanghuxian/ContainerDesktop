@@ -12,6 +12,7 @@ struct ContainerDesktopMainMenuControllerTests {
         var openedSections: [AppSection] = []
         var settingsOpenCount = 0
         var terminalOpenCount = 0
+        var compatibleSystemTerminalOpenCount = 0
         var updateCheckCount = 0
         var reloadCount = 0
 
@@ -23,6 +24,7 @@ struct ContainerDesktopMainMenuControllerTests {
             openMain: { section in openedSections.append(section) },
             openSettings: { settingsOpenCount += 1 },
             openDockerCompatibilityTerminal: { terminalOpenCount += 1 },
+            openDockerCompatibilitySystemTerminal: { compatibleSystemTerminalOpenCount += 1 },
             checkForUpdates: { updateCheckCount += 1 },
             reload: { reloadCount += 1 }
         )
@@ -48,6 +50,7 @@ struct ContainerDesktopMainMenuControllerTests {
             "刷新",
             "Docker 转换",
             "Docker 兼容终端",
+            "兼容系统终端",
             "Dashboard",
             "Containers",
             "Machines",
@@ -99,6 +102,12 @@ struct ContainerDesktopMainMenuControllerTests {
         }
         #expect(terminalOpenCount == 1)
 
+        if let compatibleSystemTerminalItem = application.mainMenu?.items[2].submenu?.items.first(where: { $0.title == "兼容系统终端" }),
+           let action = compatibleSystemTerminalItem.action {
+            NSApp.sendAction(action, to: compatibleSystemTerminalItem.target, from: compatibleSystemTerminalItem)
+        }
+        #expect(compatibleSystemTerminalOpenCount == 1)
+
         let englishSnapshot = ContainerDesktopMenuLocalizationSnapshot(
             language: .en,
             selectedSection: .containers
@@ -123,6 +132,7 @@ struct ContainerDesktopMainMenuControllerTests {
             "Refresh",
             "Docker Convert",
             "Docker Compatibility Terminal",
+            "Compatible System Terminal",
             "Dashboard",
             "Containers",
             "Machines",
@@ -175,6 +185,7 @@ struct ContainerDesktopMainMenuControllerTests {
             openMain: { _ in },
             openSettings: {},
             openDockerCompatibilityTerminal: {},
+            openDockerCompatibilitySystemTerminal: {},
             checkForUpdates: {},
             reload: {}
         )
@@ -217,6 +228,7 @@ struct ContainerDesktopMainMenuControllerTests {
             openMain: { _ in },
             openSettings: {},
             openDockerCompatibilityTerminal: {},
+            openDockerCompatibilitySystemTerminal: {},
             checkForUpdates: {},
             reload: {}
         )
@@ -237,6 +249,7 @@ struct ContainerDesktopMainMenuControllerTests {
             "Refresh",
             "Docker Convert",
             "Docker Compatibility Terminal",
+            "Compatible System Terminal",
             "Dashboard",
             "Containers",
             "Machines",

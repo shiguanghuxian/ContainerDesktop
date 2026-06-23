@@ -4,20 +4,29 @@ struct NetworkDetailPage: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
     var name: String
+    var initialTab: NetworkDetailTab = .overview
     @Binding var isPresented: Bool
 
     @State private var detailStore: NetworkDetailStore
 
-    init(runtimeStore: RuntimeStore, name: String, isPresented: Binding<Bool>) {
+    init(
+        runtimeStore: RuntimeStore,
+        name: String,
+        initialTab: NetworkDetailTab = .overview,
+        isPresented: Binding<Bool>
+    ) {
         self.runtimeStore = runtimeStore
         self.name = name
+        self.initialTab = initialTab
         _isPresented = isPresented
-        _detailStore = State(initialValue: NetworkDetailStore(
+        let store = NetworkDetailStore(
             networkName: name,
             inspectLoader: { [runtimeStore] networkName in
                 try await runtimeStore.loadNetworkInspect(name: networkName)
             }
-        ))
+        )
+        store.selectedTab = initialTab
+        _detailStore = State(initialValue: store)
     }
 
     private var resolvedNetwork: NetworkSummary? {

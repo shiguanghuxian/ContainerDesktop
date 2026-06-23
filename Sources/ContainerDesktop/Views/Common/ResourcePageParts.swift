@@ -243,7 +243,7 @@ struct ContainerBrowserPortInlineMenuButton: View {
             Menu {
                 ContainerBrowserPortMenuItems(targets: targets)
             } label: {
-                Label(language.resolved == .zhHans ? "打开端口" : "Open Port", systemImage: "safari")
+                Label(language.resolved == .zhHans ? "端口操作" : "Port Actions", systemImage: "ellipsis.circle")
                     .font(.caption.weight(.semibold))
                     .labelStyle(.titleAndIcon)
                     .foregroundStyle(isDisabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(CDTheme.dockerBlue))
@@ -260,7 +260,7 @@ struct ContainerBrowserPortInlineMenuButton: View {
             .disabled(isDisabled)
             .help(isDisabled
                 ? (language.resolved == .zhHans ? "容器未运行，端口不可访问" : "The container is not running.")
-                : (language.resolved == .zhHans ? "在浏览器中打开端口" : "Open port in browser"))
+                : (language.resolved == .zhHans ? "打开网站或复制端口连接信息" : "Open websites or copy port connection details"))
         }
     }
 }
@@ -274,7 +274,7 @@ struct ContainerBrowserPortMenuButton: View {
     var body: some View {
         if isLoading {
             RowActionButton(
-                systemImage: "safari",
+                systemImage: "ellipsis.circle",
                 tint: CDTheme.dockerBlue,
                 isLoading: true,
                 isDisabled: true,
@@ -282,15 +282,15 @@ struct ContainerBrowserPortMenuButton: View {
             ) {}
         } else if !targets.isEmpty {
             RowActionMenuButton(
-                systemImage: "safari",
+                systemImage: "ellipsis.circle",
                 tint: CDTheme.dockerBlue,
-                help: language.resolved == .zhHans ? "在浏览器中打开端口" : "Open port in browser"
+                help: language.resolved == .zhHans ? "打开网站或复制端口连接信息" : "Open websites or copy port connection details"
             ) {
                 ContainerBrowserPortMenuItems(targets: targets)
             }
         } else if let errorMessage {
             RowActionButton(
-                systemImage: "safari",
+                systemImage: "ellipsis.circle",
                 tint: .secondary,
                 isDisabled: true,
                 help: errorMessage
@@ -304,34 +304,90 @@ struct ContainerBrowserPortMenuItems: View {
     var targets: [ContainerBrowserPortTarget]
 
     var body: some View {
+        let hostTargets = menuTargets(for: .host)
+        let containerTargets = menuTargets(for: .container)
+
+        if !hostTargets.isEmpty {
+            Section {
+                targetButtons(hostTargets)
+            } header: {
+                Text(language.resolved == .zhHans ? "宿主机" : "Host")
+            }
+        }
+
+        if !containerTargets.isEmpty {
+            Section {
+                targetButtons(containerTargets)
+            } header: {
+                Text(language.resolved == .zhHans ? "容器 IP" : "Container IP")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func targetButtons(_ targets: [ContainerBrowserPortTarget]) -> some View {
         ForEach(targets) { target in
             Button {
-                NSWorkspace.shared.open(target.url)
+                execute(target)
             } label: {
-                Label(menuTitle(for: target), systemImage: systemImage(for: target))
+                Label(menuTitle(for: target), systemImage: target.systemImage)
             }
-            .help(target.url.absoluteString)
+            .help(helpText(for: target))
         }
+    }
+
+    private func menuTargets(for source: ContainerBrowserPortTargetSource) -> [ContainerBrowserPortTarget] {
+        targets
+            .filter { $0.source == source }
+            .sorted {
+                if $0.containerPort != $1.containerPort {
+                    return $0.containerPort < $1.containerPort
+                }
+                if $0.action.menuOrder != $1.action.menuOrder {
+                    return $0.action.menuOrder < $1.action.menuOrder
+                }
+                return $0.endpointText < $1.endpointText
+            }
     }
 
     private func menuTitle(for target: ContainerBrowserPortTarget) -> String {
-        let prefix: String
-        switch target.source {
-        case .host:
-            prefix = language.resolved == .zhHans ? "宿主机" : "Host"
-        case .container:
-            prefix = language.resolved == .zhHans ? "容器 IP" : "Container IP"
+        let verb: String
+        switch target.action {
+        case .openURL:
+            verb = language.resolved == .zhHans ? "打开" : "Open"
+        case .copyURL:
+            verb = language.resolved == .zhHans ? "复制 URL" : "Copy URL"
+        case .copyAddress:
+            verb = language.resolved == .zhHans ? "复制地址" : "Copy address"
+        case .copyConnectionString:
+            verb = language.resolved == .zhHans ? "复制连接串" : "Copy connection string"
+        case .copyEnvironmentSnippet:
+            verb = language.resolved == .zhHans ? "复制环境变量" : "Copy env snippet"
+        case .copyCLICommand:
+            verb = language.resolved == .zhHans ? "复制客户端命令" : "Copy client command"
+        case .copyHealthCheckCommand:
+            verb = language.resolved == .zhHans ? "复制检查命令" : "Copy check command"
         }
-        return "\(prefix) \(target.url.host ?? ""):\(target.url.port ?? target.containerPort)"
+
+        return "\(verb) · \(target.title) · \(target.endpointText)"
     }
 
-    private func systemImage(for target: ContainerBrowserPortTarget) -> String {
-        switch target.source {
-        case .host:
-            "safari"
-        case .container:
-            "network"
+    private func execute(_ target: ContainerBrowserPortTarget) {
+        switch target.action {
+        case .openURL:
+            if let url = target.url {
+                NSWorkspace.shared.open(url)
+            }
+        case .copyURL, .copyAddress, .copyConnectionString, .copyEnvironmentSnippet, .copyCLICommand, .copyHealthCheckCommand:
+            if let value = target.copyValue {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(value, forType: .string)
+            }
         }
+    }
+
+    private func helpText(for target: ContainerBrowserPortTarget) -> String {
+        target.url?.absoluteString ?? target.copyValue ?? target.endpointText
     }
 }
 

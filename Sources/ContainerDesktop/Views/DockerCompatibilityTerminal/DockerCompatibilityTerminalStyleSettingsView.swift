@@ -1,7 +1,9 @@
+import AppKit
 import SwiftUI
 
 enum DockerCompatibilityTerminalSettingsSection: String, CaseIterable, Identifiable {
     case language
+    case systemTerminal
     case outputBuffer
     case appearance
 
@@ -11,6 +13,8 @@ enum DockerCompatibilityTerminalSettingsSection: String, CaseIterable, Identifia
         switch self {
         case .language:
             "globe"
+        case .systemTerminal:
+            "terminal"
         case .outputBuffer:
             "text.line.last.and.arrowtriangle.forward"
         case .appearance:
@@ -22,6 +26,8 @@ enum DockerCompatibilityTerminalSettingsSection: String, CaseIterable, Identifia
         switch self {
         case .language:
             DockerCompatibilityTerminalStrings.languageTitle(language)
+        case .systemTerminal:
+            DockerCompatibilityTerminalStrings.systemTerminalTitle(language)
         case .outputBuffer:
             DockerCompatibilityTerminalStrings.outputBufferTitle(language)
         case .appearance:
@@ -33,6 +39,8 @@ enum DockerCompatibilityTerminalSettingsSection: String, CaseIterable, Identifia
         switch self {
         case .language:
             DockerCompatibilityTerminalStrings.languageSubtitle(language)
+        case .systemTerminal:
+            DockerCompatibilityTerminalStrings.systemTerminalSubtitle(language)
         case .outputBuffer:
             DockerCompatibilityTerminalStrings.outputBufferSubtitle(language)
         case .appearance:
@@ -212,6 +220,10 @@ struct DockerCompatibilityTerminalSettingsView: View {
                     title: { $0.displayName }
                 )
                 .frame(width: 340)
+            }
+        case .systemTerminal:
+            settingsGroup(title: DockerCompatibilityTerminalStrings.systemTerminalTitle(language), subtitle: DockerCompatibilityTerminalStrings.systemTerminalSubtitle(language)) {
+                SystemTerminalSettingsPanel()
             }
         case .outputBuffer:
             settingsGroup(title: DockerCompatibilityTerminalStrings.outputBufferTitle(language), subtitle: DockerCompatibilityTerminalStrings.outputBufferSubtitle(language)) {

@@ -5,7 +5,10 @@ import UniformTypeIdentifiers
 struct ContainersView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
+    @Bindable var composeStore: ComposeProjectStore
+    @Bindable var operationStore: AppOperationStore
     @Bindable var statsHistoryStore: ContainerStatsHistoryStore
+    @Binding var resourceRoute: AppResourceRoute?
     @State private var searchText = ""
     @State private var onlyRunning = false
     @State private var showRunPopover = false
@@ -59,10 +62,26 @@ struct ContainersView: View {
     @State private var newContainerCapAdd = ""
     @State private var newContainerCapDrop = ""
     @State private var newContainerUlimits = ""
+    @State private var selectedRunTemplateID = "custom"
     @State private var detailID: String?
+    @State private var detailInitialTab: ContainerDetailTab?
     @State private var drawerID: String?
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var pendingDelete: ContainerSummary?
+
+    init(
+        runtimeStore: RuntimeStore,
+        composeStore: ComposeProjectStore,
+        operationStore: AppOperationStore,
+        statsHistoryStore: ContainerStatsHistoryStore,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
+    ) {
+        self.runtimeStore = runtimeStore
+        self.composeStore = composeStore
+        self.operationStore = operationStore
+        self.statsHistoryStore = statsHistoryStore
+        _resourceRoute = resourceRoute
+    }
 
     private var filteredContainers: [ContainerSummary] {
         let query = searchText.trimmed.lowercased()
@@ -98,12 +117,16 @@ struct ContainersView: View {
             if let container = detailContainer {
                 ContainerDetailPage(
                     runtimeStore: runtimeStore,
+                    composeStore: composeStore,
+                    operationStore: operationStore,
                     statsHistoryStore: statsHistoryStore,
                     containerID: detailID ?? container.id,
+                    initialTab: detailInitialTab,
                     isPresented: Binding(
                         get: { detailID != nil },
-                        set: { if !$0 { detailID = nil } }
-                    )
+                        set: { if !$0 { detailID = nil; detailInitialTab = nil } }
+                    ),
+                    resourceRoute: $resourceRoute
                 )
             } else {
                 DrawerPageLayout(isDrawerPresented: drawerContainer != nil, onDismiss: {
@@ -126,6 +149,12 @@ struct ContainersView: View {
                 }
             }
         }
+        .onAppear {
+            consumeResourceRoute()
+        }
+        .onChange(of: resourceRoute) { _, route in
+            consumeResourceRoute(route)
+        }
         .alert("删除容器？", isPresented: Binding(
             get: { pendingDelete != nil },
             set: { if !$0 { pendingDelete = nil } }
@@ -140,6 +169,15 @@ struct ContainersView: View {
         } message: {
             Text("将删除容器 \(pendingDelete?.id ?? "所选容器")。运行中的容器需要先停止。")
         }
+    }
+
+    private func consumeResourceRoute(_ route: AppResourceRoute? = nil) {
+        let route = route ?? resourceRoute
+        guard case .container(let id, let tab) = route else { return }
+        detailID = id
+        detailInitialTab = tab
+        drawerID = nil
+        resourceRoute = nil
     }
 
     private var pageContent: some View {
@@ -304,6 +342,7 @@ struct ContainersView: View {
 
     private func openContainerDetail(_ container: ContainerSummary) {
         detailID = container.id
+        detailInitialTab = nil
     }
 
     private func openContainerDrawer(_ container: ContainerSummary) {
@@ -360,6 +399,16 @@ struct ContainersView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     runFormSection(language.resolved == .zhHans ? "基础" : "Basics") {
+                        Picker(language.resolved == .zhHans ? "服务模板" : "Service Template", selection: $selectedRunTemplateID) {
+                            Text(language.resolved == .zhHans ? "自定义" : "Custom").tag("custom")
+                            ForEach(DeveloperRunTemplate.allCases) { template in
+                                Text(template.title).tag(template.id)
+                            }
+                        }
+                        .onChange(of: selectedRunTemplateID) { _, newValue in
+                            applyRunTemplate(id: newValue)
+                        }
+
                         Toggle(language.resolved == .zhHans ? "只创建，不启动" : "Create only", isOn: $newContainerCreateOnly)
                             .toggleStyle(.switch)
                         Toggle(language.resolved == .zhHans ? "自动命名" : "Automatic name", isOn: $useAutoContainerName)
@@ -589,6 +638,59 @@ struct ContainersView: View {
 
         showRunPopover = false
         Task { await runtimeStore.runContainer(options: options) }
+    }
+
+    private func applyRunTemplate(id: String) {
+        guard id != "custom", let template = DeveloperRunTemplate.template(id: id) else { return }
+        let options = template.options()
+        newContainerImage = options.image
+        newContainerCommandPreset = options.command.isEmpty ? .imageDefault : .custom
+        customContainerCommand = options.command.map(ShellEscaper.singleQuoted).joined(separator: " ")
+        newContainerCreateOnly = options.createOnly
+        newContainerDetached = options.detached
+        newContainerInteractive = options.interactive
+        newContainerTTY = options.tty
+        newContainerRemove = options.removeWhenStopped
+        newContainerReadOnly = options.readOnlyRoot
+        newContainerInit = options.initProcess
+        newContainerRosetta = options.rosetta
+        newContainerSSH = options.sshAgent
+        newContainerVirtualization = options.virtualization
+        newContainerNoDNS = options.noDNS
+        newContainerCPUs = options.cpus ?? ""
+        newContainerMemory = options.memory ?? ""
+        newContainerPlatform = options.platform ?? ""
+        newContainerOS = options.os ?? ""
+        newContainerArch = options.arch ?? ""
+        newContainerUser = options.user ?? ""
+        newContainerUID = options.uid ?? ""
+        newContainerGID = options.gid ?? ""
+        newContainerWorkdir = options.workdir ?? ""
+        newContainerEntrypoint = options.entrypoint ?? ""
+        newContainerRuntime = options.runtime ?? ""
+        newContainerKernel = options.kernel ?? ""
+        newContainerCIDFile = options.cidfile ?? ""
+        newContainerInitImage = options.initImage ?? ""
+        newContainerShmSize = options.shmSize ?? ""
+        newContainerDNSDomain = options.dnsDomain ?? ""
+        newContainerScheme = options.scheme ?? "auto"
+        newContainerProgress = options.progress ?? "auto"
+        newContainerMaxDownloads = options.maxConcurrentDownloads ?? ""
+        newContainerPorts = options.ports.joined(separator: "\n")
+        newContainerEnv = options.env.joined(separator: "\n")
+        newContainerEnvFiles = options.envFiles.joined(separator: "\n")
+        newContainerVolumes = options.volumes.joined(separator: "\n")
+        newContainerMounts = options.mounts.joined(separator: "\n")
+        newContainerNetworks = options.networks.joined(separator: "\n")
+        newContainerPublishSockets = options.publishSockets.joined(separator: "\n")
+        newContainerLabels = options.labels.joined(separator: "\n")
+        newContainerDNS = options.dns.joined(separator: "\n")
+        newContainerDNSSearch = options.dnsSearch.joined(separator: "\n")
+        newContainerDNSOptions = options.dnsOptions.joined(separator: "\n")
+        newContainerTmpfs = options.tmpfs.joined(separator: "\n")
+        newContainerCapAdd = options.capAdd.joined(separator: "\n")
+        newContainerCapDrop = options.capDrop.joined(separator: "\n")
+        newContainerUlimits = options.ulimits.joined(separator: "\n")
     }
 
     private func exportContainer(_ container: ContainerSummary) {

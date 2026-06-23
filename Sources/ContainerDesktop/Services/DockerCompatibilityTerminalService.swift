@@ -128,6 +128,19 @@ struct DockerCompatibilityTerminalService: Sendable {
         esac
 
         export DOCKER_CLI_HINTS=false
+        containerdesktop_report_cwd() {
+          emulate -L zsh
+          local host="${HOST:-localhost}"
+          local path="${PWD//%/%25}"
+          path="${path// /%20}"
+          printf '\\033]7;file://%s%s\\007' "$host" "$path"
+        }
+
+        autoload -Uz add-zsh-hook
+        add-zsh-hook precmd containerdesktop_report_cwd
+        add-zsh-hook chpwd containerdesktop_report_cwd
+        containerdesktop_report_cwd
+
         printf '\\033[1;36m%s\\033[0m\\n' "\(AppBranding.displayName) Docker compatibility terminal"
         printf 'docker/docker-compose -> container/container-compose\\n'
         printf 'shim: %s\\n\\n' "$CONTAINERDESKTOP_DOCKER_SHIM_BIN"

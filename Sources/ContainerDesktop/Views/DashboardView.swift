@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct DashboardView: View {
@@ -5,7 +6,9 @@ struct DashboardView: View {
     @Bindable var runtimeStore: RuntimeStore
     @Bindable var composeStore: ComposeProjectStore
     @Bindable var systemConfigStore: SystemConfigStore
+    @Bindable var operationStore: AppOperationStore
     var onOpenResourceSnapshot: () -> Void
+    var onOpenResourceRoute: (AppResourceRoute) -> Void
 
     private let metricColumns = [
         GridItem(.adaptive(minimum: 176), spacing: 12),
@@ -125,6 +128,18 @@ struct DashboardView: View {
             if let diskUsage = runtimeStore.diskUsage {
                 CompactDiskUsagePanel(diskUsage: diskUsage)
             }
+
+            DashboardRecommendationsPanel(
+                recommendations: DashboardRecommendationCatalog.make(
+                    containers: runtimeStore.containers,
+                    images: runtimeStore.images,
+                    volumes: runtimeStore.volumes,
+                    stats: runtimeStore.globalStats,
+                    environment: runtimeStore.environment,
+                    language: language
+                ),
+                onOpenRoute: onOpenResourceRoute
+            )
 
             let onboardingIssues = runtimeStore.onboardingIssues(language: language)
 
@@ -288,6 +303,107 @@ private struct CompactDashboardPanel<Content: View>: View {
         }
         .padding(12)
         .glassPanel(accent: accent)
+    }
+}
+
+private struct DashboardRecommendationsPanel: View {
+    @Environment(\.appLanguage) private var language
+    var recommendations: [DashboardRecommendation]
+    var onOpenRoute: (AppResourceRoute) -> Void
+
+    var body: some View {
+        if !recommendations.isEmpty {
+            PanelView(
+                title: language.resolved == .zhHans ? "建议" : "Suggestions",
+                subtitle: language.resolved == .zhHans ? "基于当前本地资源快照，不会自动执行" : "Based on the local snapshot; never runs automatically",
+                systemImage: "lightbulb"
+            ) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10)], spacing: 10) {
+                    ForEach(recommendations) { recommendation in
+                        DashboardRecommendationCard(recommendation: recommendation, onOpenRoute: onOpenRoute)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct DashboardRecommendationCard: View {
+    @Environment(\.appLanguage) private var language
+    var recommendation: DashboardRecommendation
+    var onOpenRoute: (AppResourceRoute) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                IconTile(systemImage: recommendation.systemImage, tint: tint, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recommendation.title)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Text(recommendation.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if let commandPreview = recommendation.commandPreview {
+                Text(commandPreview)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+
+            HStack {
+                if let route = recommendation.route {
+                    Button {
+                        onOpenRoute(route)
+                    } label: {
+                        Label(language.resolved == .zhHans ? "打开" : "Open", systemImage: "arrow.right")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(language.resolved == .zhHans ? "打开相关资源" : "Open related resource")
+                }
+
+                if let commandPreview = recommendation.commandPreview {
+                    Button {
+                        copy(commandPreview)
+                    } label: {
+                        Label(language.resolved == .zhHans ? "复制命令" : "Copy Command", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(language.resolved == .zhHans ? "复制底层命令" : "Copy command")
+                }
+            }
+            .labelStyle(.titleAndIcon)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(tint.opacity(0.26))
+        }
+    }
+
+    private var tint: Color {
+        switch recommendation.severity {
+        case .info:
+            CDTheme.dockerBlue
+        case .warning:
+            CDTheme.ember
+        case .cleanup:
+            CDTheme.violet
+        }
+    }
+
+    private func copy(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }
 

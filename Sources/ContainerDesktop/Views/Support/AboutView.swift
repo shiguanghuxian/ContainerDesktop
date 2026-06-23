@@ -151,7 +151,7 @@ struct AboutView: View {
                     .help(localized("打开最新版本发布页", "Open the latest release page"))
                 }
 
-                if let releaseNotes = appUpdateStore.releaseNotesText {
+                if let releaseNotes = appUpdateStore.releaseNotesText(for: language.resolved) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(localized("发布说明", "Release Notes"))
                             .font(.caption.weight(.bold))

@@ -80,6 +80,31 @@ struct AppOperationStoreTests {
         #expect(loaded.records.last?.output == "pulled")
     }
 
+    @Test("diagnostic report includes command status target and output")
+    func diagnosticReportIncludesCommandStatusTargetAndOutput() {
+        let record = AppOperationRecord(
+            id: UUID(),
+            domain: .network,
+            title: "Create network",
+            target: "dev-net",
+            commandPreview: "container network create dev-net",
+            status: .failed,
+            output: "line 1\nline 2\nline 3",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_003)
+        )
+
+        let report = record.diagnosticReport(language: .en)
+
+        #expect(record.outputPreview == "line 1\nline 2")
+        #expect(record.durationText == "3s")
+        #expect(report.contains("Domain: Network"))
+        #expect(report.contains("Target: dev-net"))
+        #expect(report.contains("Status: Failed"))
+        #expect(report.contains("container network create dev-net"))
+        #expect(report.contains("line 1\nline 2\nline 3"))
+    }
+
     private func temporaryURL() -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "containerdesktop-tests-\(UUID().uuidString)", directoryHint: .isDirectory)

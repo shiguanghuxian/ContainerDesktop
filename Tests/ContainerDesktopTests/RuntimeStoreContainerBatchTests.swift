@@ -156,7 +156,7 @@ struct RuntimeStoreContainerBatchTests {
         await store.loadBrowserPortTargets(for: container)
         await store.loadBrowserPortTargets(for: container)
 
-        #expect(store.browserPortTargets(for: container).map(\.url.absoluteString) == [
+        #expect(store.browserPortTargets(for: container).compactMap { $0.url?.absoluteString } == [
             "http://127.0.0.1:8080",
             "http://192.168.64.2:80",
         ])

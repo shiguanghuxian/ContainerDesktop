@@ -14,12 +14,14 @@ struct ComposeView: View {
     @Bindable var systemConfigStore: SystemConfigStore
     @Bindable var operationStore: AppOperationStore
     @Bindable var statsHistoryStore: ContainerStatsHistoryStore
+    @Binding var resourceRoute: AppResourceRoute?
 
     @State private var showImporter = false
     @State private var searchText = ""
     @State private var expandedProjectIDs: Set<ComposeProject.ID> = []
     @State private var activeDrawer: ComposeActiveDrawer?
     @State private var detailContainerID: String?
+    @State private var detailContainerInitialTab: ContainerDetailTab?
     @State private var pendingRemove: ComposeProject?
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var serviceObservationStore = ComposeServiceObservationStore()
@@ -34,6 +36,22 @@ struct ComposeView: View {
     @State private var composeUlimitsText = ""
     @State private var activeComposeOperationKey: String?
     @State private var activeComposeContainerActionKey: String?
+
+    init(
+        runtimeStore: RuntimeStore,
+        composeStore: ComposeProjectStore,
+        systemConfigStore: SystemConfigStore,
+        operationStore: AppOperationStore,
+        statsHistoryStore: ContainerStatsHistoryStore,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
+    ) {
+        self.runtimeStore = runtimeStore
+        self.composeStore = composeStore
+        self.systemConfigStore = systemConfigStore
+        self.operationStore = operationStore
+        self.statsHistoryStore = statsHistoryStore
+        _resourceRoute = resourceRoute
+    }
 
     private let projectActionColumnWidth: CGFloat = 244
 
@@ -75,8 +93,8 @@ struct ComposeView: View {
 
     private var composeRegistrationHintText: String {
         language.resolved == .zhHans
-            ? "在普通系统终端创建或启动的 Compose 项目不会自动出现在这里，请点击“添加项目”选择 compose.yaml 或 docker-compose.yml。Docker 兼容终端中的 docker compose 命令会自动登记。"
-            : "Compose projects created or started in a regular system terminal do not appear here automatically. Click Add Project and choose compose.yaml or docker-compose.yml. docker compose commands in the Docker Compatibility Terminal are registered automatically."
+            ? "未启用兼容 shim 的普通系统终端创建或启动的 Compose 项目不会自动出现在这里，请点击“添加项目”选择 compose.yaml 或 docker-compose.yml。Docker 兼容终端和兼容系统终端中的 docker compose 命令会自动登记。"
+            : "Compose projects created or started in a regular system terminal without the compatibility shim do not appear here automatically. Click Add Project and choose compose.yaml or docker-compose.yml. docker compose commands in the Docker Compatibility Terminal and compatible system terminals are registered automatically."
     }
 
     var body: some View {
@@ -84,13 +102,17 @@ struct ComposeView: View {
             if let container = detailContainer {
                 ContainerDetailPage(
                     runtimeStore: runtimeStore,
+                    composeStore: composeStore,
+                    operationStore: operationStore,
                     statsHistoryStore: statsHistoryStore,
                     containerID: detailContainerID ?? container.id,
+                    initialTab: detailContainerInitialTab,
                     parentTitle: language.t(.compose),
                     isPresented: Binding(
                         get: { detailContainerID != nil },
-                        set: { if !$0 { detailContainerID = nil } }
-                    )
+                        set: { if !$0 { detailContainerID = nil; detailContainerInitialTab = nil } }
+                    ),
+                    resourceRoute: $resourceRoute
                 )
             } else {
                 DrawerPageLayout(
@@ -123,6 +145,12 @@ struct ComposeView: View {
             guard case .success(let urls) = result, let url = urls.first else { return }
             Task { await composeStore.addProject(fileURL: url) }
         }
+        .onAppear {
+            consumeResourceRoute()
+        }
+        .onChange(of: resourceRoute) { _, route in
+            consumeResourceRoute(route)
+        }
         .alert("移除 Compose 项目？", isPresented: Binding(
             get: { pendingRemove != nil },
             set: { if !$0 { pendingRemove = nil } }
@@ -149,67 +177,97 @@ struct ComposeView: View {
             rawLabel: "YAML",
             onClose: closeActiveDrawer
         ) {
-            ComposeProjectOverview(
-                project: selectedProject,
-                runtimeSummaries: selectedProject.runtimeSummaries(containers: runtimeStore.containers),
-                lastOutput: composeStore.lastOutput,
-                observationStore: serviceObservationStore,
-                onOpenContainer: { container in
-                    detailContainerID = container.id
-                },
-                browserPortTargets: { container in
-                    runtimeStore.browserPortTargets(for: container)
-                },
-                isBrowserPortTargetsLoading: { container in
-                    runtimeStore.isLoadingBrowserPortTargets(for: container)
-                },
-                browserPortTargetError: { container in
-                    runtimeStore.browserPortTargetError(for: container)
-                },
-                onLoadBrowserPortTargets: { container in
-                    await runtimeStore.loadBrowserPortTargets(for: container)
-                },
-                onOpenServiceTerminal: { summary, destination in
-                    openServiceTerminal(summary, destination: destination)
-                },
-                onObserveProject: { summaries in
-                    Task {
-                        await serviceObservationStore.loadProject(
-                            projectName: selectedProject.name,
-                            summaries: summaries
-                        )
+            VStack(alignment: .leading, spacing: 14) {
+                ComposeProjectOverview(
+                    project: selectedProject,
+                    runtimeSummaries: selectedProject.runtimeSummaries(containers: runtimeStore.containers),
+                    lastOutput: composeStore.lastOutput,
+                    observationStore: serviceObservationStore,
+                    onOpenContainer: { container in
+                        detailContainerID = container.id
+                        detailContainerInitialTab = nil
+                    },
+                    browserPortTargets: { container in
+                        runtimeStore.browserPortTargets(for: container)
+                    },
+                    isBrowserPortTargetsLoading: { container in
+                        runtimeStore.isLoadingBrowserPortTargets(for: container)
+                    },
+                    browserPortTargetError: { container in
+                        runtimeStore.browserPortTargetError(for: container)
+                    },
+                    onLoadBrowserPortTargets: { container in
+                        await runtimeStore.loadBrowserPortTargets(for: container)
+                    },
+                    onOpenServiceTerminal: { summary, destination in
+                        openServiceTerminal(summary, destination: destination)
+                    },
+                    onObserveProject: { summaries in
+                        Task {
+                            await serviceObservationStore.loadProject(
+                                projectName: selectedProject.name,
+                                summaries: summaries
+                            )
+                        }
+                    },
+                    onObserveService: { summary in
+                        Task {
+                            await serviceObservationStore.load(summary: summary)
+                        }
+                    },
+                    isComposeAvailable: runtimeStore.environment.containerComposeAvailable,
+                    activeOperationKey: activeComposeOperationKey,
+                    activeContainerActionKey: activeComposeContainerActionKey,
+                    onStartContainers: { summary in
+                        runComposeContainerAction(.start, project: selectedProject, summary: summary)
+                    },
+                    onStopContainers: { summary in
+                        runComposeContainerAction(.stop, project: selectedProject, summary: summary)
+                    },
+                    onRestartContainers: { summary in
+                        runComposeContainerAction(.restart, project: selectedProject, summary: summary)
+                    },
+                    onBuildService: { service in
+                        runComposeOperation(.build, project: selectedProject, services: [service.name])
+                    },
+                    onUpService: { service in
+                        runComposeOperation(.up, project: selectedProject, services: [service.name])
+                    },
+                    onDownService: { service in
+                        runComposeOperation(.down, project: selectedProject, services: [service.name])
+                    },
+                    onRebuildService: { service in
+                        runComposeOperation(.rebuild, project: selectedProject, services: [service.name])
                     }
-                },
-                onObserveService: { summary in
-                    Task {
-                        await serviceObservationStore.load(summary: summary)
-                    }
-                },
-                isComposeAvailable: runtimeStore.environment.containerComposeAvailable,
-                activeOperationKey: activeComposeOperationKey,
-                activeContainerActionKey: activeComposeContainerActionKey,
-                onStartContainers: { summary in
-                    runComposeContainerAction(.start, project: selectedProject, summary: summary)
-                },
-                onStopContainers: { summary in
-                    runComposeContainerAction(.stop, project: selectedProject, summary: summary)
-                },
-                onRestartContainers: { summary in
-                    runComposeContainerAction(.restart, project: selectedProject, summary: summary)
-                },
-                onBuildService: { service in
-                    runComposeOperation(.build, project: selectedProject, services: [service.name])
-                },
-                onUpService: { service in
-                    runComposeOperation(.up, project: selectedProject, services: [service.name])
-                },
-                onDownService: { service in
-                    runComposeOperation(.down, project: selectedProject, services: [service.name])
-                },
-                onRebuildService: { service in
-                    runComposeOperation(.rebuild, project: selectedProject, services: [service.name])
-                }
-            )
+                )
+
+                OperationHistoryPanel(
+                    store: operationStore,
+                    domains: [.compose],
+                    title: language.resolved == .zhHans ? "最近 Compose 任务" : "Recent Compose Tasks",
+                    limit: 5
+                )
+            }
+        }
+    }
+
+    private func consumeResourceRoute(_ route: AppResourceRoute? = nil) {
+        let route = route ?? resourceRoute
+        switch route {
+        case .composeProject(let id):
+            if let id {
+                activeDrawer = .project(id)
+            }
+            resourceRoute = nil
+        case .composeTasks:
+            activeDrawer = .tasks
+            resourceRoute = nil
+        case .container(let id, let tab):
+            detailContainerID = id
+            detailContainerInitialTab = tab
+            resourceRoute = nil
+        default:
+            break
         }
     }
 

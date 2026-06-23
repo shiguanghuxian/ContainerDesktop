@@ -3,6 +3,7 @@ import SwiftUI
 struct NetworksView: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
+    @Binding var resourceRoute: AppResourceRoute?
     @State private var searchText = ""
     @State private var newNetworkName = ""
     @State private var subnet = ""
@@ -14,9 +15,18 @@ struct NetworksView: View {
     @State private var showAdvancedCreateOptions = false
     @State private var showCreatePopover = false
     @State private var detailName: String?
+    @State private var detailInitialTab: NetworkDetailTab = .overview
     @State private var selectedName: String?
     @State private var pendingDelete: NetworkSummary?
     @State private var drawerMode: DetailDrawerMode = .overview
+
+    init(
+        runtimeStore: RuntimeStore,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
+    ) {
+        self.runtimeStore = runtimeStore
+        _resourceRoute = resourceRoute
+    }
 
     private var filteredNetworks: [NetworkSummary] {
         let query = searchText.trimmed.lowercased()
@@ -46,6 +56,7 @@ struct NetworksView: View {
                 NetworkDetailPage(
                     runtimeStore: runtimeStore,
                     name: detailName,
+                    initialTab: detailInitialTab,
                     isPresented: isDetailPresented
                 )
             } else {
@@ -88,6 +99,21 @@ struct NetworksView: View {
         } message: {
             Text("将删除网络 \(pendingDelete?.name ?? "所选网络")。系统或正在使用的网络可能无法删除。")
         }
+        .onAppear {
+            consumeResourceRoute()
+        }
+        .onChange(of: resourceRoute) { _, route in
+            consumeResourceRoute(route)
+        }
+    }
+
+    private func consumeResourceRoute(_ route: AppResourceRoute? = nil) {
+        let route = route ?? resourceRoute
+        guard case .network(let name, let tab) = route else { return }
+        selectedName = nil
+        detailInitialTab = tab ?? .overview
+        detailName = name
+        resourceRoute = nil
     }
 
     private var pageContent: some View {
@@ -200,6 +226,7 @@ struct NetworksView: View {
 
     private func openNetworkDetail(_ network: NetworkSummary) {
         selectedName = nil
+        detailInitialTab = .overview
         detailName = network.name
     }
 

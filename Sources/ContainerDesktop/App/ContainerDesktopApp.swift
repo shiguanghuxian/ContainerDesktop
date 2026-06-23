@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private let runtimeStore = RuntimeStore()
     private let composeStore = ComposeProjectStore()
     private let systemConfigStore = SystemConfigStore()
+    private let launchAtLoginStore = LaunchAtLoginStore()
     private let operationStore = AppOperationStore()
     private let appUpdateStore = AppUpdateStore()
     private let statsHistoryStore = ContainerStatsHistoryStore()
@@ -94,6 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     addTabIfWindowExists: true
                 )
             },
+            openDockerCompatibilitySystemTerminal: { [weak self] in
+                self?.openDockerCompatibilitySystemTerminal()
+            },
             openDockerCompatibilityTerminalStyleSettings: { [weak self] in
                 self?.openDockerCompatibilityTerminalStyleSettingsWindow()
             }
@@ -102,12 +106,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         observeUserDefaults()
         observeComposeProjectAutoRegistrationRequests()
         configureStatusItem()
+        refreshDockerCompatibilitySystemTerminalIntegrationIfInstalled()
         openMainWindow()
         loadInitialData()
         NSUpdateDynamicServices()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        launchAtLoginStore.refresh()
         ContainerDesktopMainMenuController.shared.reinstallMenuIfNeeded()
     }
 
@@ -296,6 +302,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         window.orderFrontRegardless()
     }
 
+    private func openDockerCompatibilitySystemTerminal() {
+        do {
+            try SystemTerminalLauncher.openDockerCompatibilityShell(
+                terminalApp: SystemTerminalAppPreference.selectedTerminalApp()
+            )
+        } catch {
+            runtimeStore.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshDockerCompatibilitySystemTerminalIntegrationIfInstalled() {
+        let integration = DockerCompatibilitySystemTerminalIntegration()
+        guard integration.isInstalled else { return }
+
+        do {
+            let environment = try DockerCompatibilityTerminalService().prepareEnvironment()
+            try integration.writeIntegrationScript(shimDirectory: environment.shimBinDirectory)
+        } catch {
+            runtimeStore.errorMessage = error.localizedDescription
+        }
+    }
+
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
@@ -386,6 +414,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 },
                 openDockerCompatibilityTerminal: {
                     self.openDockerCompatibilityTerminalAppOrWindow()
+                },
+                openDockerCompatibilitySystemTerminal: {
+                    self.openDockerCompatibilitySystemTerminal()
                 },
                 checkForUpdates: {
                     UserDefaults.standard.set(AppSection.about.rawValue, forKey: "containerdesktop.selected.section")
@@ -483,7 +514,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func settingsRootView() -> AnyView {
         AnyView(
-            SettingsView(systemConfigStore: systemConfigStore)
+            SettingsView(
+                systemConfigStore: systemConfigStore,
+                launchAtLoginStore: launchAtLoginStore
+            )
                 .environment(\.appLanguage, language)
                 .preferredColorScheme(appearance.colorScheme)
         )

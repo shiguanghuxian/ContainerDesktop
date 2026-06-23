@@ -43,6 +43,7 @@ struct ContainerExecTabView: View {
                 terminalLockOverlay
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .task {
             if container.state == "running", store.terminalState == .disconnected {
                 await store.startTerminal()

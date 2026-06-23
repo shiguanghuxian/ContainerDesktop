@@ -125,6 +125,16 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: defaults) == 12_000)
     }
 
+    @Test("terminal current directory resolver parses OSC 7 file URLs")
+    func terminalCurrentDirectoryResolverParsesOSC7FileURLs() {
+        #expect(TerminalCurrentDirectoryResolver.localDirectoryURL(from: "file:///Users/a/frontend")?.path == "/Users/a/frontend")
+        #expect(TerminalCurrentDirectoryResolver.localDirectoryURL(from: "file://host/Users/a/My%20Project")?.path == "/Users/a/My Project")
+        #expect(TerminalCurrentDirectoryResolver.localDirectoryURL(from: nil) == nil)
+        #expect(TerminalCurrentDirectoryResolver.localDirectoryURL(from: "") == nil)
+        #expect(TerminalCurrentDirectoryResolver.localDirectoryURL(from: "https://example.com/Users/a/frontend") == nil)
+        #expect(TerminalCurrentDirectoryResolver.localDirectoryURL(from: "not a url") == nil)
+    }
+
     @Test("standalone terminal resolves containing main application")
     func standaloneTerminalResolvesContainingMainApplication() {
         let terminalURL = URL(fileURLWithPath: "/tmp/ContainerDesktop.app/Contents/Applications/Docker Compatibility Terminal.app")
@@ -194,12 +204,22 @@ struct DockerCompatibilityTerminalApplicationTests {
     func terminalStringsLocalizeForBothLanguages() {
         #expect(DockerCompatibilityTerminalStrings.settingsWindowTitle(.zhHans) == "终端设置")
         #expect(DockerCompatibilityTerminalStrings.settingsWindowTitle(.en) == "Terminal Settings")
-        #expect(DockerCompatibilityTerminalStrings.settingsHeaderSubtitle(.zhHans) == "调整终端语言、输出缓存和外观。")
-        #expect(DockerCompatibilityTerminalStrings.settingsHeaderSubtitle(.en) == "Adjust the terminal language, output buffer, and appearance.")
+        #expect(DockerCompatibilityTerminalStrings.settingsHeaderSubtitle(.zhHans) == "调整终端语言、系统终端打开方式、输出缓存和外观。")
+        #expect(DockerCompatibilityTerminalStrings.settingsHeaderSubtitle(.en) == "Adjust the terminal language, system terminal app, output buffer, and appearance.")
         #expect(DockerCompatibilityTerminalStrings.settingsMenuTitle(.zhHans) == "终端设置…")
         #expect(DockerCompatibilityTerminalStrings.settingsMenuTitle(.en) == "Terminal Settings...")
         #expect(DockerCompatibilityTerminalStrings.openTerminalHelp(.zhHans) == "打开 Docker 兼容终端")
         #expect(DockerCompatibilityTerminalStrings.openTerminalHelp(.en) == "Open Docker compatibility terminal")
+        #expect(DockerCompatibilityTerminalStrings.openTerminalMenu(.zhHans) == "打开终端")
+        #expect(DockerCompatibilityTerminalStrings.openTerminalMenu(.en) == "Open terminal")
+        #expect(DockerCompatibilityTerminalStrings.systemTerminalTitle(.zhHans) == "系统终端")
+        #expect(DockerCompatibilityTerminalStrings.compatibleSystemTerminalTitle(.zhHans) == "兼容系统终端")
+        #expect(DockerCompatibilityTerminalStrings.compatibleSystemTerminalTitle(.en) == "Compatible System Terminal")
+        #expect(DockerCompatibilityTerminalStrings.systemTerminalOpenWith(.zhHans) == "打开方式")
+        #expect(DockerCompatibilityTerminalStrings.systemDefaultTerminalApp(.en) == "System Default Terminal")
+        #expect(DockerCompatibilityTerminalStrings.refreshTerminalApps(.zhHans) == "刷新终端列表")
+        #expect(DockerCompatibilityTerminalStrings.noOtherTerminalAppsFound(.en).contains("No other terminal apps"))
+        #expect(DockerCompatibilityTerminalStrings.openCompatibleSystemTerminal(.en) == "Open Compatible System Terminal")
         #expect(DockerCompatibilityTerminalStrings.outputBufferLinesTitle(.zhHans) == "输出缓存行数")
         #expect(DockerCompatibilityTerminalStrings.outputBufferLinesTitle(.en) == "Output buffer lines")
         #expect(DockerCompatibilityTerminalStrings.newTab(.zhHans) == "新建 Tab")
@@ -308,23 +328,227 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(delegate.sentData == [Data([0x03])])
     }
 
+    @MainActor
+    @Test("terminal view coordinator reports current directory changes")
+    func terminalViewCoordinatorReportsCurrentDirectoryChanges() {
+        let terminalView = FocusableTerminalView(frame: .zero)
+        var reportedDirectories: [String?] = []
+        let coordinator = SwiftTermTerminalView.Coordinator(
+            onInput: { _ in },
+            onSizeChange: { _, _ in },
+            onCurrentDirectoryChange: { directory in
+                reportedDirectories.append(directory)
+            }
+        )
+
+        coordinator.hostCurrentDirectoryUpdate(source: terminalView, directory: "file:///tmp")
+        coordinator.hostCurrentDirectoryUpdate(source: terminalView, directory: nil)
+
+        #expect(reportedDirectories == ["file:///tmp", nil])
+    }
+
     @Test("terminal settings view exposes output buffer controls")
     func terminalSettingsViewExposesOutputBufferControls() throws {
         let source = try String(contentsOfFile: "Sources/ContainerDesktop/Views/DockerCompatibilityTerminal/DockerCompatibilityTerminalStyleSettingsView.swift", encoding: .utf8)
+        let systemTerminalPanelSource = try String(contentsOfFile: "Sources/ContainerDesktop/Views/Common/SystemTerminalSettingsPanel.swift", encoding: .utf8)
         let preferencesSource = try String(contentsOfFile: "Sources/ContainerDesktop/Support/AppPreferences.swift", encoding: .utf8)
 
         #expect(source.contains("DockerCompatibilityTerminalSettingsSection"))
         #expect(source.contains("case language"))
+        #expect(source.contains("case systemTerminal"))
         #expect(source.contains("case outputBuffer"))
         #expect(source.contains("case appearance"))
         #expect(source.contains("@State private var selectedSection"))
         #expect(source.contains("settingsSidebar"))
         #expect(source.contains("selectedSectionContent"))
+        #expect(source.contains("SystemTerminalSettingsPanel()"))
+        #expect(!source.contains("private var systemTerminalSettings"))
+        #expect(systemTerminalPanelSource.contains("struct SystemTerminalSettingsPanel"))
+        #expect(systemTerminalPanelSource.contains("systemTerminalAppSelection"))
+        #expect(systemTerminalPanelSource.contains("SystemTerminalAppDiscovery"))
+        #expect(systemTerminalPanelSource.contains("selectedSystemTerminalAppBundleID"))
+        #expect(systemTerminalPanelSource.contains("SystemTerminalAppPreference.setSelectedBundleIdentifier"))
+        #expect(systemTerminalPanelSource.contains("Picker("))
+        #expect(systemTerminalPanelSource.contains("refreshSystemTerminalApps"))
+        #expect(systemTerminalPanelSource.contains("DockerCompatibilitySystemTerminalIntegration"))
+        #expect(systemTerminalPanelSource.contains("openCompatibleSystemTerminal"))
+        #expect(systemTerminalPanelSource.contains("installSystemTerminalIntegration"))
+        #expect(systemTerminalPanelSource.contains("uninstallSystemTerminalIntegration"))
+        #expect(systemTerminalPanelSource.contains("copySystemTerminalShimPath"))
         #expect(source.contains("DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey"))
         #expect(source.contains("TextField("))
         #expect(source.contains("Stepper("))
         #expect(source.contains("outputBufferSettings"))
         #expect(preferencesSource.contains("containerdesktop.dockerCompatibilityTerminal.outputEventLimit"))
+        #expect(preferencesSource.contains("containerdesktop.dockerCompatibilityTerminal.systemTerminalAppBundleID"))
+    }
+
+    @Test("system terminal compatibility script injects shim after user zshrc")
+    func systemTerminalCompatibilityScriptInjectsShimAfterUserZshrc() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let shimDirectory = directory.appending(path: "bin", directoryHint: .isDirectory)
+        let shellDirectory = directory.appending(path: "shell", directoryHint: .isDirectory)
+        let workingDirectory = directory.appending(path: "Project", directoryHint: .isDirectory)
+        let environment = DockerCompatibilityTerminalEnvironment(
+            shimBinDirectory: shimDirectory,
+            shellConfigDirectory: shellDirectory,
+            shellPath: "/bin/zsh"
+        )
+
+        let script = SystemTerminalLauncher.dockerCompatibilityShellScript(
+            workingDirectory: workingDirectory,
+            environment: environment
+        )
+
+        #expect(script.contains("source \"$HOME/.zshrc\""))
+        #expect(script.contains("CONTAINERDESKTOP_DOCKER_SHIM_BIN"))
+        #expect(script.contains(shimDirectory.path))
+        #expect(script.contains("export PATH=\"$CONTAINERDESKTOP_DOCKER_SHIM_BIN:$PATH\""))
+        #expect(script.contains("cd \(ShellEscaper.singleQuoted(workingDirectory.standardizedFileURL.path))"))
+        #expect(script.contains("ZDOTDIR=\"$session_zdotdir\" /bin/zsh -i"))
+        #expect(script.contains("rm -rf \"$session_zdotdir\""))
+    }
+
+    @Test("system terminal app discovery includes default and sorts unique apps")
+    func systemTerminalAppDiscoveryIncludesDefaultAndSortsUniqueApps() {
+        let terminal = SystemTerminalApp(
+            bundleIdentifier: "com.apple.Terminal",
+            displayName: "Terminal",
+            appURL: URL(fileURLWithPath: "/Applications/Terminal.app"),
+            isSystemDefault: false,
+            isAvailable: true
+        )
+        let duplicateTerminal = SystemTerminalApp(
+            bundleIdentifier: "com.apple.Terminal",
+            displayName: "Terminal Duplicate",
+            appURL: URL(fileURLWithPath: "/Applications/Utilities/Terminal.app"),
+            isSystemDefault: false,
+            isAvailable: true
+        )
+        let warp = SystemTerminalApp(
+            bundleIdentifier: "dev.warp.Warp-Stable",
+            displayName: "Warp",
+            appURL: URL(fileURLWithPath: "/Applications/Warp.app"),
+            isSystemDefault: false,
+            isAvailable: true
+        )
+        let custom = SystemTerminalApp(
+            bundleIdentifier: "com.example.Terminal",
+            displayName: "Custom Terminal",
+            appURL: URL(fileURLWithPath: "/Applications/Custom Terminal.app"),
+            isSystemDefault: false,
+            isAvailable: true
+        )
+
+        let apps = SystemTerminalAppDiscovery.normalized([custom, warp, duplicateTerminal, terminal])
+        let terminalBundleCount = apps
+            .compactMap(\.bundleIdentifier)
+            .filter { $0 == "com.apple.Terminal" }
+            .count
+        let orderedBundleIdentifiers = apps.dropFirst().compactMap(\.bundleIdentifier)
+
+        #expect(apps.first?.isSystemDefault == true)
+        #expect(terminalBundleCount == 1)
+        #expect(orderedBundleIdentifiers == ["com.apple.Terminal", "dev.warp.Warp-Stable", "com.example.Terminal"])
+    }
+
+    @Test("system terminal app preference stores and clears bundle identifier")
+    func systemTerminalAppPreferenceStoresAndClearsBundleIdentifier() {
+        let suiteName = "ContainerDesktopTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        SystemTerminalAppPreference.setSelectedBundleIdentifier("com.googlecode.iterm2", in: defaults)
+        #expect(SystemTerminalAppPreference.selectedBundleIdentifier(in: defaults) == "com.googlecode.iterm2")
+
+        SystemTerminalAppPreference.setSelectedBundleIdentifier("", in: defaults)
+        #expect(SystemTerminalAppPreference.selectedBundleIdentifier(in: defaults) == nil)
+        #expect(defaults.object(forKey: SystemTerminalAppPreference.defaultsKey) == nil)
+    }
+
+    @Test("system terminal launcher and resource entries support selected app")
+    func systemTerminalLauncherAndResourceEntriesSupportSelectedApp() throws {
+        let launcherSource = try String(contentsOfFile: "Sources/ContainerDesktop/Support/SystemTerminalLauncher.swift", encoding: .utf8)
+        let externalSource = try String(contentsOfFile: "Sources/ContainerDesktop/Support/ExternalTerminalLauncher.swift", encoding: .utf8)
+        let appSource = try String(contentsOfFile: "Sources/ContainerDesktop/App/ContainerDesktopApp.swift", encoding: .utf8)
+
+        #expect(launcherSource.contains("terminalApp: SystemTerminalApp? = nil"))
+        #expect(launcherSource.contains("withApplicationAt: appURL"))
+        #expect(launcherSource.contains("selectedTerminalUnavailable"))
+        #expect(externalSource.contains("SystemTerminalAppPreference.selectedTerminalApp()"))
+        #expect(appSource.contains("SystemTerminalAppPreference.selectedTerminalApp()"))
+    }
+
+    @Test("system terminal integration installs updates and uninstalls marker block")
+    func systemTerminalIntegrationInstallsUpdatesAndUninstallsMarkerBlock() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let zshrcURL = directory.appending(path: ".zshrc")
+        let backupURL = directory.appending(path: ".zshrc.backup")
+        let integrationScriptURL = directory.appending(path: "shell-integration.zsh")
+        let shimDirectory = directory.appending(path: "bin", directoryHint: .isDirectory)
+        try "export USER_SETTING=1\n".write(to: zshrcURL, atomically: true, encoding: .utf8)
+
+        let integration = DockerCompatibilitySystemTerminalIntegration(
+            zshrcURL: zshrcURL,
+            integrationScriptURL: integrationScriptURL,
+            backupURL: backupURL
+        )
+
+        try integration.install(shimDirectory: shimDirectory)
+        try integration.install(shimDirectory: shimDirectory)
+
+        let zshrcText = try String(contentsOf: zshrcURL, encoding: .utf8)
+        let integrationScript = try String(contentsOf: integrationScriptURL, encoding: .utf8)
+        let backupText = try String(contentsOf: backupURL, encoding: .utf8)
+
+        #expect(integration.isInstalled)
+        #expect(zshrcText.contains("export USER_SETTING=1"))
+        #expect(zshrcText.contains(DockerCompatibilitySystemTerminalIntegration.beginMarker))
+        #expect(zshrcText.contains(integrationScriptURL.path))
+        #expect(zshrcText.components(separatedBy: DockerCompatibilitySystemTerminalIntegration.beginMarker).count == 2)
+        #expect(integrationScript.contains("CONTAINERDESKTOP_DOCKER_SHIM_BIN"))
+        #expect(integrationScript.contains(shimDirectory.path))
+        #expect(integrationScript.contains("export PATH=\"$CONTAINERDESKTOP_DOCKER_SHIM_BIN:$PATH\""))
+        #expect(backupText == "export USER_SETTING=1\n")
+
+        try integration.uninstall()
+
+        let uninstalledText = try String(contentsOf: zshrcURL, encoding: .utf8)
+        #expect(!integration.isInstalled)
+        #expect(uninstalledText.contains("export USER_SETTING=1"))
+        #expect(!uninstalledText.contains(DockerCompatibilitySystemTerminalIntegration.beginMarker))
+        #expect(!uninstalledText.contains(DockerCompatibilitySystemTerminalIntegration.endMarker))
+    }
+
+    @MainActor
+    @Test("docker terminal store tracks reported current directory")
+    func dockerTerminalStoreTracksReportedCurrentDirectory() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstDirectory = directory.appending(path: "frontend", directoryHint: .isDirectory)
+        let secondDirectory = directory.appending(path: "backend", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+
+        let store = DockerCompatibilityTerminalStore(workingDirectory: firstDirectory)
+        store.updateCurrentDirectory(fromTerminalDirectory: "file://localhost\(secondDirectory.path)")
+
+        #expect(store.workingDirectory == secondDirectory.standardizedFileURL)
+        #expect(store.workingDirectoryText == secondDirectory.standardizedFileURL.path)
+
+        store.updateCurrentDirectory(fromTerminalDirectory: "https://example.com/ignored")
+        #expect(store.workingDirectory == secondDirectory.standardizedFileURL)
+
+        let targetStore = DockerCompatibilityTerminalStore(
+            openRequest: DockerCompatibilityTerminalOpenRequest(
+                workingDirectory: firstDirectory,
+                shellTarget: .container(id: "web-1")
+            )
+        )
+        targetStore.updateCurrentDirectory(fromTerminalDirectory: "file://localhost\(secondDirectory.path)")
+        #expect(targetStore.workingDirectory == firstDirectory.standardizedFileURL)
     }
 
     @MainActor
@@ -363,6 +587,28 @@ struct DockerCompatibilityTerminalApplicationTests {
     }
 
     @MainActor
+    @Test("docker terminal tab title follows current directory")
+    func dockerTerminalTabTitleFollowsCurrentDirectory() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstDirectory = directory.appending(path: "frontend", directoryHint: .isDirectory)
+        let secondDirectory = directory.appending(path: "backend", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+
+        let tabsStore = DockerCompatibilityTerminalTabsStore(initialWorkingDirectory: firstDirectory)
+        let firstTab = try #require(tabsStore.selectedTab)
+
+        #expect(firstTab.title == "frontend")
+        firstTab.store.updateCurrentDirectory(fromTerminalDirectory: "file://localhost\(secondDirectory.path)")
+        #expect(firstTab.title == "backend")
+
+        let inheritedTab = tabsStore.newTab()
+        #expect(inheritedTab.workingDirectory == secondDirectory.standardizedFileURL)
+        #expect(inheritedTab.title == "backend")
+    }
+
+    @MainActor
     @Test("docker terminal tabs support structured shell targets")
     func dockerTerminalTabsSupportStructuredShellTargets() {
         let tabsStore = DockerCompatibilityTerminalTabsStore(
@@ -373,6 +619,8 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(firstTab.title == "Container web-1")
         #expect(firstTab.shellTarget == .container(id: "web-1"))
         #expect(firstTab.store.openRequest.shellTarget == .container(id: "web-1"))
+        firstTab.store.updateCurrentDirectory(fromTerminalDirectory: "file:///tmp")
+        #expect(firstTab.title == "Container web-1")
 
         let machineTab = tabsStore.newTab(request: DockerCompatibilityTerminalOpenRequest(shellTarget: .machine(id: "dev-machine")))
         #expect(machineTab.title == "Machine dev-machine")
@@ -544,6 +792,21 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(commonSource.contains("ExternalTerminalDestination.allCases"))
     }
 
+    @Test("docker terminal tab item uses full chip selection hit area")
+    func dockerTerminalTabItemUsesFullChipSelectionHitArea() throws {
+        let source = try String(contentsOfFile: "Sources/ContainerDesktop/Views/DockerCompatibilityTerminal/DockerCompatibilityTerminalTabsView.swift", encoding: .utf8)
+        let tabItemStart = try #require(source.range(of: "private func tabItem"))
+        let tabBackgroundStart = try #require(source.range(of: "private func tabBackground"))
+        let tabItemSource = String(source[tabItemStart.lowerBound..<tabBackgroundStart.lowerBound])
+
+        #expect(tabItemSource.contains("ZStack(alignment: .trailing)"))
+        #expect(tabItemSource.contains("tabsStore.selectTab(id: tab.id)"))
+        #expect(tabItemSource.contains(".padding(.trailing, 28)"))
+        #expect(tabItemSource.contains(".contentShape(RoundedRectangle(cornerRadius: 6))"))
+        #expect(tabItemSource.contains("closeTab(tab.id)"))
+        #expect(tabItemSource.contains("Image(systemName: \"xmark\")"))
+    }
+
     @MainActor
     @Test("terminal window chrome follows terminal style")
     func terminalWindowChromeFollowsTerminalStyle() {
@@ -625,8 +888,162 @@ struct DockerCompatibilityTerminalApplicationTests {
 
         #expect(store.terminalOutputSequence == 1)
         #expect(store.terminalOutputEvents.count == 1)
-        #expect(store.terminalText.contains("step-0\r"))
-        #expect(store.terminalText.contains("step-199\r"))
+        #expect(store.terminalOutputEvents.last?.text.contains("step-199\r") == true)
+        #expect(store.terminalText.contains("step-199"))
+        #expect(!store.terminalText.contains("\r"))
+        #expect(!store.terminalText.contains("step-0\r"))
+    }
+
+    @MainActor
+    @Test("docker terminal replaces continuous carriage return progress cache")
+    func dockerTerminalReplacesContinuousCarriageReturnProgressCache() {
+        let store = DockerCompatibilityTerminalStore(workingDirectory: AppPaths.homeDirectory)
+
+        for index in 0..<200 {
+            store.appendTerminalChunk("progress-\(String(format: "%04d", index))\r", flushImmediately: true)
+        }
+
+        #expect(store.terminalOutputSequence == 200)
+        #expect(store.terminalOutputEvents.count == 1)
+        #expect(store.terminalOutputEvents.last?.sequence == 200)
+        #expect(store.terminalOutputEvents.last?.text == "progress-0199\r")
+        #expect(store.terminalText == "progress-0199")
+        #expect(!store.terminalText.contains("progress-0000"))
+    }
+
+    @MainActor
+    @Test("docker terminal replaces carriage return prompt redraw cache")
+    func dockerTerminalReplacesCarriageReturnPromptRedrawCache() {
+        let store = DockerCompatibilityTerminalStore(workingDirectory: AppPaths.homeDirectory)
+
+        for _ in 0..<10 {
+            store.appendTerminalChunk("\rzuoxiupeng➜~» ", flushImmediately: true)
+        }
+
+        #expect(store.terminalOutputSequence == 10)
+        #expect(store.terminalOutputEvents.count == 1)
+        #expect(store.terminalText == "zuoxiupeng➜~» ")
+        #expect(!store.terminalText.contains("\r"))
+    }
+
+    @MainActor
+    @Test("docker terminal replaces active command line redraw cache")
+    func dockerTerminalReplacesActiveCommandLineRedrawCache() {
+        let store = DockerCompatibilityTerminalStore(workingDirectory: AppPaths.homeDirectory)
+
+        store.appendTerminalChunk("zuoxiupeng➜~» ", flushImmediately: true)
+        store.appendTerminalChunk("ls", flushImmediately: true)
+        store.appendTerminalChunk("\rzuoxiupeng➜~» ls", flushImmediately: true)
+
+        #expect(store.terminalText == "zuoxiupeng➜~» ls")
+        #expect(!store.terminalText.contains("lszuoxiupeng"))
+    }
+
+    @MainActor
+    @Test("docker terminal replaces CSI prompt redraw cache")
+    func dockerTerminalReplacesCSIPromptRedrawCache() {
+        let store = DockerCompatibilityTerminalStore(workingDirectory: AppPaths.homeDirectory)
+
+        store.appendTerminalChunk("zuoxiupeng➜~» ", flushImmediately: true)
+        store.appendTerminalChunk("\u{1B}[1Gzuoxiupeng➜~» ", flushImmediately: true)
+        store.appendTerminalChunk("\u{1B}[2K\u{1B}[1Gzuoxiupeng➜~» ", flushImmediately: true)
+        store.appendTerminalChunk("\u{1B}[Kzuoxiupeng➜~» ", flushImmediately: true)
+
+        #expect(store.terminalOutputEvents.last?.text == "\u{1B}[Kzuoxiupeng➜~» ")
+        #expect(store.terminalText == "zuoxiupeng➜~» ")
+        #expect(!store.terminalText.contains("\u{1B}[1G"))
+        #expect(!store.terminalText.contains("\u{1B}[2K"))
+        #expect(!store.terminalText.contains("\u{1B}[K"))
+    }
+
+    @MainActor
+    @Test("docker terminal prompt redraw does not remove committed history")
+    func dockerTerminalPromptRedrawDoesNotRemoveCommittedHistory() {
+        let store = DockerCompatibilityTerminalStore(workingDirectory: AppPaths.homeDirectory)
+
+        store.appendTerminalChunk("zuoxiupeng➜~» ls\n", flushImmediately: true)
+        store.appendTerminalChunk("README.md\n", flushImmediately: true)
+        store.appendTerminalChunk("\rzuoxiupeng➜~» ", flushImmediately: true)
+        store.appendTerminalChunk("\rzuoxiupeng➜~» ", flushImmediately: true)
+
+        #expect(store.terminalText == "zuoxiupeng➜~» ls\nREADME.md\nzuoxiupeng➜~» ")
+    }
+
+    @MainActor
+    @Test("docker terminal progress does not evict normal cached logs")
+    func dockerTerminalProgressDoesNotEvictNormalCachedLogs() {
+        let suiteName = "ContainerDesktopTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(1_000, forKey: DockerCompatibilityTerminalHistorySettings.outputEventLimitDefaultsKey)
+        let store = DockerCompatibilityTerminalStore(
+            historyDefaults: defaults,
+            workingDirectory: AppPaths.homeDirectory
+        )
+
+        for index in 1...900 {
+            store.appendTerminalChunk("line-\(index)\n", flushImmediately: true)
+        }
+        for index in 1...10_000 {
+            store.appendTerminalChunk("push-\(index)\r", flushImmediately: true)
+        }
+        for index in 901...910 {
+            store.appendTerminalChunk("line-\(index)\n", flushImmediately: true)
+        }
+
+        #expect(store.terminalOutputSequence == 10_910)
+        #expect(store.terminalOutputEvents.count == 911)
+        #expect(store.terminalOutputEvents.first?.sequence == 1)
+        #expect(store.terminalText.contains("line-1\n"))
+        #expect(store.terminalText.contains("line-910\n"))
+        #expect(store.terminalText.contains("push-10000"))
+        #expect(!store.terminalText.contains("\r"))
+        #expect(!store.terminalText.contains("push-1\rpush-2"))
+    }
+
+    @MainActor
+    @Test("docker terminal compacts repeated carriage returns in one chunk")
+    func dockerTerminalCompactsRepeatedCarriageReturnsInOneChunk() {
+        let store = DockerCompatibilityTerminalStore(workingDirectory: AppPaths.homeDirectory)
+
+        store.appendTerminalChunk("0%\r50%\r100%\n", flushImmediately: true)
+
+        #expect(store.terminalOutputSequence == 1)
+        #expect(store.terminalOutputEvents.count == 1)
+        #expect(store.terminalOutputEvents.last?.text == "0%\r50%\r100%\n")
+        #expect(store.terminalText == "100%\n")
+
+        let clearLineFrame = TerminalOverwriteReplayCompactor.compact("old\r\u{1B}[2Knew\r")
+        #expect(clearLineFrame.snapshotText == "new")
+        #expect(clearLineFrame.replaceableSuffixCharacterCount == 3)
+
+        let commandEchoFrame = TerminalOverwriteReplayCompactor.compact("ls\r\n")
+        #expect(commandEchoFrame.snapshotText == "ls\n")
+
+        let committedProgressFrame = TerminalOverwriteReplayCompactor.compact("0%\r50%\r100%\r\n")
+        #expect(committedProgressFrame.snapshotText == "100%\n")
+
+        let startupPromptFrame = TerminalOverwriteReplayCompactor.compact(
+            "\u{1B}[1;36mContainer Desktop Docker compatibility terminal\u{1B}[0m\nshim: /tmp/docker-compatibility/bin\n\rzuoxiupeng➜~» "
+        )
+        #expect(startupPromptFrame.snapshotText.contains("\u{1B}[1;36mContainer Desktop"))
+        #expect(startupPromptFrame.snapshotText.contains("shim: /tmp/docker-compatibility/bin\n"))
+        #expect(startupPromptFrame.snapshotText.contains("zuoxiupeng➜~» "))
+        #expect(!startupPromptFrame.snapshotText.contains("\r"))
+        #expect(!startupPromptFrame.snapshotText.contains("\u{1B}[1G"))
+    }
+
+    @Test("terminal snapshot replay converts lone line feeds")
+    func terminalSnapshotReplayConvertsLoneLineFeeds() throws {
+        #expect(TerminalSnapshotReplayText.feedText(from: "a\nb\n") == "a\r\nb\r\n")
+        #expect(TerminalSnapshotReplayText.feedText(from: "a\r\nb\r\n") == "a\r\nb\r\n")
+        #expect(TerminalSnapshotReplayText.feedText(from: "zuoxiupeng➜~» ") == "zuoxiupeng➜~» ")
+
+        let startupSnapshot = "title\nmapping\nshim\n\nzuoxiupeng➜~» "
+        #expect(TerminalSnapshotReplayText.feedText(from: startupSnapshot) == "title\r\nmapping\r\nshim\r\n\r\nzuoxiupeng➜~» ")
+
+        let terminalViewSource = try String(contentsOfFile: "Sources/ContainerDesktop/Views/Common/SwiftTermTerminalView.swift", encoding: .utf8)
+        #expect(terminalViewSource.contains("TerminalSnapshotReplayText.feedText(from: textSnapshot)"))
     }
 
     @MainActor
@@ -791,6 +1208,18 @@ struct DockerCompatibilityTerminalApplicationTests {
         #expect(releaseScript.contains("TERMINAL_ICON_SOURCE"))
         #expect(bundleScript.contains("create_docker_compatibility_terminal_app_bundle"))
         #expect(bundleScript.contains("<string>DockerCompatibilityTerminalIcon</string>"))
+    }
+
+    @Test("docker terminal zsh configuration reports current directory")
+    func dockerTerminalZshConfigurationReportsCurrentDirectory() throws {
+        let serviceSource = try String(contentsOfFile: "Sources/ContainerDesktop/Services/DockerCompatibilityTerminalService.swift", encoding: .utf8)
+
+        #expect(serviceSource.contains("containerdesktop_report_cwd()"))
+        #expect(serviceSource.contains("printf '\\\\033]7;file://%s%s\\\\007'"))
+        #expect(serviceSource.contains("autoload -Uz add-zsh-hook"))
+        #expect(serviceSource.contains("add-zsh-hook precmd containerdesktop_report_cwd"))
+        #expect(serviceSource.contains("add-zsh-hook chpwd containerdesktop_report_cwd"))
+        #expect(serviceSource.contains("containerdesktop_report_cwd"))
     }
 
     @Test("finder services registration opens docker compatibility terminal")

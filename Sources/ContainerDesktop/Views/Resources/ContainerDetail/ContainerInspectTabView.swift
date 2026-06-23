@@ -36,6 +36,7 @@ struct ContainerInspectTabView: View {
                     .strokeBorder(CDTheme.separator)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var toolbar: some View {

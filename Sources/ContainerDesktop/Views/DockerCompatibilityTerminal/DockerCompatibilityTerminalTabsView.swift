@@ -120,7 +120,7 @@ struct DockerCompatibilityTerminalTabsView: View {
 
     private func tabItem(_ tab: DockerCompatibilityTerminalTab) -> some View {
         let isSelected = tab.id == tabsStore.selectedTab?.id
-        return HStack(spacing: 3) {
+        return ZStack(alignment: .trailing) {
             Button {
                 tabsStore.selectTab(id: tab.id)
             } label: {
@@ -135,8 +135,9 @@ struct DockerCompatibilityTerminalTabsView: View {
                         .frame(minWidth: 74, maxWidth: 170, alignment: .leading)
                 }
                 .padding(.leading, 9)
-                .padding(.trailing, 4)
+                .padding(.trailing, 28)
                 .frame(height: 27)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
 

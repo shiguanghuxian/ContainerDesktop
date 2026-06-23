@@ -59,4 +59,9 @@ enum AppPaths {
         dockerCompatibilityDirectory
             .appending(path: "shell")
     }
+
+    static var dockerCompatibilityShellIntegrationURL: URL {
+        dockerCompatibilityShellDirectory
+            .appending(path: "shell-integration.zsh")
+    }
 }

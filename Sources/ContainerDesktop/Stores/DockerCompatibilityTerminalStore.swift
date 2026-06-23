@@ -9,9 +9,9 @@ final class DockerCompatibilityTerminalStore {
     private let maxTerminalCharacters = 180_000
     private let terminalOutputFlushDelayNanoseconds: UInt64 = 16_000_000
     let openRequest: DockerCompatibilityTerminalOpenRequest
-    let workingDirectory: URL
     let shellTarget: TerminalShellTarget?
 
+    var workingDirectory: URL
     var terminalText = ""
     var terminalOutputEvents: [TerminalOutputEvent] = []
     var terminalOutputSequence = 0
@@ -25,6 +25,7 @@ final class DockerCompatibilityTerminalStore {
     @ObservationIgnored private var terminalRows = 24
     @ObservationIgnored private var pendingTerminalOutput = ""
     @ObservationIgnored private var pendingTerminalFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var activeTerminalLineCharacterCount = 0
 
     init(
         service: DockerCompatibilityTerminalService = DockerCompatibilityTerminalService(),
@@ -114,6 +115,15 @@ final class DockerCompatibilityTerminalStore {
         terminalSession?.resize(columns: columns, rows: rows)
     }
 
+    func updateCurrentDirectory(fromTerminalDirectory terminalDirectory: String?) {
+        guard shellTarget == nil,
+              let directory = TerminalCurrentDirectoryResolver.localDirectoryURL(from: terminalDirectory)
+        else {
+            return
+        }
+        workingDirectory = directory
+    }
+
     func clearTerminal() {
         flushPendingTerminalOutput()
         resetTerminalOutput()
@@ -135,6 +145,7 @@ final class DockerCompatibilityTerminalStore {
         terminalText = ""
         terminalOutputEvents = []
         terminalOutputSequence = 0
+        activeTerminalLineCharacterCount = 0
     }
 
     func appendTerminalChunk(_ chunk: String, flushImmediately: Bool = false) {
@@ -171,16 +182,60 @@ final class DockerCompatibilityTerminalStore {
     }
 
     private func appendTerminalFrame(_ chunk: String) {
-        terminalText.append(chunk)
+        let frame = TerminalOverwriteReplayCompactor.compact(chunk)
+        appendSnapshotFrame(frame)
         terminalOutputSequence &+= 1
-        terminalOutputEvents.append(TerminalOutputEvent(sequence: terminalOutputSequence, text: chunk))
+        let event = TerminalOutputEvent(
+            sequence: terminalOutputSequence,
+            text: frame.feedText,
+            isReplaceable: frame.isPureReplaceable
+        )
+        if event.isReplaceable, terminalOutputEvents.last?.isReplaceable == true {
+            terminalOutputEvents[terminalOutputEvents.count - 1] = event
+        } else {
+            terminalOutputEvents.append(event)
+        }
         let maxTerminalOutputEvents = DockerCompatibilityTerminalHistorySettings.storedOutputEventLimit(in: historyDefaults)
         if terminalOutputEvents.count > maxTerminalOutputEvents {
             terminalOutputEvents.removeFirst(terminalOutputEvents.count - maxTerminalOutputEvents)
         }
         if terminalText.count > maxTerminalCharacters {
             terminalText.removeFirst(terminalText.count - maxTerminalCharacters)
+            activeTerminalLineCharacterCount = 0
         }
+    }
+
+    private func appendSnapshotFrame(_ frame: TerminalReplayFrame) {
+        guard !frame.operations.isEmpty else { return }
+
+        for operation in frame.operations {
+            switch operation {
+            case .append(let text):
+                appendTerminalSnapshotText(text)
+            case .replaceActiveLine(let text):
+                replaceActiveTerminalLine(with: text)
+            }
+        }
+    }
+
+    private func appendTerminalSnapshotText(_ text: String) {
+        guard !text.isEmpty else { return }
+        terminalText.append(text)
+        if let lastNewlineIndex = text.lastIndex(of: "\n") {
+            let activeLineStart = text.index(after: lastNewlineIndex)
+            activeTerminalLineCharacterCount = text[activeLineStart...].count
+        } else {
+            activeTerminalLineCharacterCount += text.count
+        }
+    }
+
+    private func replaceActiveTerminalLine(with text: String) {
+        if activeTerminalLineCharacterCount > 0,
+           terminalText.count >= activeTerminalLineCharacterCount {
+            terminalText.removeLast(activeTerminalLineCharacterCount)
+        }
+        activeTerminalLineCharacterCount = 0
+        appendTerminalSnapshotText(text)
     }
 
     deinit {

@@ -24,10 +24,33 @@ enum MonospaceTextAppearance {
     }
 }
 
+enum MonospaceTextScrollBehavior {
+    static let bottomThreshold: CGFloat = 24
+
+    static func isNearBottom(
+        visibleMaxY: CGFloat,
+        documentHeight: CGFloat,
+        threshold: CGFloat = bottomThreshold
+    ) -> Bool {
+        visibleMaxY >= max(documentHeight - max(threshold, 0), 0)
+    }
+
+    static func clampedOriginY(
+        _ originY: CGFloat,
+        visibleHeight: CGFloat,
+        documentHeight: CGFloat
+    ) -> CGFloat {
+        min(max(originY, 0), max(documentHeight - visibleHeight, 0))
+    }
+
+}
+
 struct ReadOnlyMonospaceTextView: NSViewRepresentable {
     var text: String
     var appearance: MonospaceTextAppearance
     var autoScrollToBottom = false
+    var scrollToBottomRequestID = 0
+    var isScrolledToBottom: Binding<Bool>?
     var wrapsLines = false
 
     func makeCoordinator() -> Coordinator {
@@ -39,6 +62,7 @@ struct ReadOnlyMonospaceTextView: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = !wrapsLines
         scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = .none
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = appearance.backgroundColor
@@ -70,14 +94,24 @@ struct ReadOnlyMonospaceTextView: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
 
         scrollView.documentView = textView
-        context.coordinator.textView = textView
+        context.coordinator.attach(scrollView: scrollView, textView: textView)
+        context.coordinator.isScrolledToBottom = isScrolledToBottom
+        context.coordinator.lastScrollToBottomRequestID = scrollToBottomRequestID
+        if autoScrollToBottom {
+            context.coordinator.scheduleScrollToBottom()
+        } else {
+            context.coordinator.scheduleScrollStateRefresh()
+        }
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         nsView.hasHorizontalScroller = !wrapsLines
+        nsView.verticalScrollElasticity = .none
         nsView.backgroundColor = appearance.backgroundColor
         nsView.applyContainerDesktopThinScrollBars()
+        context.coordinator.attach(scrollView: nsView, textView: nsView.documentView as? NSTextView)
+        context.coordinator.isScrolledToBottom = isScrolledToBottom
         guard let textView = context.coordinator.textView else { return }
 
         textView.backgroundColor = appearance.backgroundColor
@@ -90,16 +124,123 @@ struct ReadOnlyMonospaceTextView: NSViewRepresentable {
         )
 
         if textView.string != text {
+            let previousOrigin = nsView.contentView.bounds.origin
+            let wasNearBottom = context.coordinator.isNearBottom()
             textView.string = text
-            if autoScrollToBottom {
-                DispatchQueue.main.async {
-                    textView.scrollToEndOfDocument(nil)
-                }
+            context.coordinator.ensureTextLayout()
+            if autoScrollToBottom, wasNearBottom {
+                context.coordinator.scheduleScrollToBottom()
+            } else {
+                context.coordinator.restoreVisibleOrigin(previousOrigin)
             }
+        }
+
+        if context.coordinator.lastScrollToBottomRequestID != scrollToBottomRequestID {
+            context.coordinator.lastScrollToBottomRequestID = scrollToBottomRequestID
+            context.coordinator.scheduleScrollToBottom()
+        } else {
+            context.coordinator.scheduleScrollStateRefresh()
         }
     }
 
-    final class Coordinator {
+    @MainActor
+    final class Coordinator: NSObject {
         weak var textView: NSTextView?
+        weak var scrollView: NSScrollView?
+        var isScrolledToBottom: Binding<Bool>?
+        var lastScrollToBottomRequestID = 0
+
+        private weak var observedClipView: NSClipView?
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        func attach(scrollView: NSScrollView, textView: NSTextView?) {
+            self.scrollView = scrollView
+            self.textView = textView
+
+            let clipView = scrollView.contentView
+            guard observedClipView !== clipView else { return }
+            if let observedClipView {
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSView.boundsDidChangeNotification,
+                    object: observedClipView
+                )
+            }
+
+            observedClipView = clipView
+            clipView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(clipViewBoundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+        }
+
+        func isNearBottom() -> Bool {
+            guard let scrollView else { return true }
+            let visibleRect = scrollView.contentView.bounds
+            return MonospaceTextScrollBehavior.isNearBottom(
+                visibleMaxY: visibleRect.maxY,
+                documentHeight: documentHeight
+            )
+        }
+
+        func restoreVisibleOrigin(_ origin: NSPoint) {
+            guard let scrollView else { return }
+            let clipView = scrollView.contentView
+            let y = MonospaceTextScrollBehavior.clampedOriginY(
+                origin.y,
+                visibleHeight: clipView.bounds.height,
+                documentHeight: documentHeight
+            )
+            clipView.scroll(to: NSPoint(x: origin.x, y: y))
+            scrollView.reflectScrolledClipView(clipView)
+            scheduleScrollStateRefresh()
+        }
+
+        func scheduleScrollToBottom() {
+            DispatchQueue.main.async { [weak self] in
+                self?.scrollToBottom()
+            }
+        }
+
+        func scheduleScrollStateRefresh() {
+            DispatchQueue.main.async { [weak self] in
+                self?.publishScrollState()
+            }
+        }
+
+        func ensureTextLayout() {
+            guard let textView else { return }
+            if let textContainer = textView.textContainer {
+                textView.layoutManager?.ensureLayout(for: textContainer)
+            }
+            textView.layoutSubtreeIfNeeded()
+            scrollView?.layoutSubtreeIfNeeded()
+        }
+
+        private func scrollToBottom() {
+            textView?.scrollToEndOfDocument(nil)
+            publishScrollState()
+        }
+
+        @objc private func clipViewBoundsDidChange(_ notification: Notification) {
+            publishScrollState()
+        }
+
+        private func publishScrollState() {
+            let value = isNearBottom()
+            guard isScrolledToBottom?.wrappedValue != value else { return }
+            isScrolledToBottom?.wrappedValue = value
+        }
+
+        private var documentHeight: CGFloat {
+            guard let documentView = scrollView?.documentView else { return 0 }
+            return max(documentView.bounds.height, documentView.frame.height)
+        }
     }
 }

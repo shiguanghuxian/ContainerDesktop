@@ -3,23 +3,29 @@ import SwiftUI
 struct VolumeDetailPage: View {
     @Environment(\.appLanguage) private var language
     @Bindable var runtimeStore: RuntimeStore
+    @Bindable var operationStore: AppOperationStore
     var name: String
     var initialTab: VolumeDetailTab = .overview
     @Binding var isPresented: Bool
+    @Binding var resourceRoute: AppResourceRoute?
 
     @State private var detailStore: VolumeDetailStore
     @State private var browserStore = VolumeBrowserStore()
 
     init(
         runtimeStore: RuntimeStore,
+        operationStore: AppOperationStore,
         name: String,
         initialTab: VolumeDetailTab = .overview,
-        isPresented: Binding<Bool>
+        isPresented: Binding<Bool>,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
     ) {
         self.runtimeStore = runtimeStore
+        self.operationStore = operationStore
         self.name = name
         self.initialTab = initialTab
         _isPresented = isPresented
+        _resourceRoute = resourceRoute
         _detailStore = State(initialValue: VolumeDetailStore(
             volumeName: name,
             initialTab: initialTab,
@@ -45,6 +51,16 @@ struct VolumeDetailPage: View {
                             onBack: { closeDetail() },
                             onRefresh: { refresh(volume: volume) }
                         )
+
+                        ResourceAssociationsPanel(
+                            sections: VolumeResourceAssociations.make(
+                                volume: volume,
+                                operations: operationStore.records,
+                                language: language
+                            ).sections
+                        ) { route in
+                            resourceRoute = route
+                        }
 
                         VolumeDetailTabBar(selection: $detailStore.selectedTab)
 

@@ -96,12 +96,24 @@ struct AppTopBar: View {
                 }
             }
 
-            TopBarButton(
+            TopBarMenuButton(
                 systemImage: "terminal",
-                help: DockerCompatibilityTerminalStrings.openTerminalHelp(language)
-            ) {
-                ContainerDesktopWindowRouter.openDockerCompatibilityTerminal()
-            }
+                help: DockerCompatibilityTerminalStrings.openTerminalMenu(language),
+                actions: [
+                    TopBarMenuAction(
+                        title: DockerCompatibilityTerminalStrings.windowTitle(language),
+                        systemImage: "terminal"
+                    ) {
+                        ContainerDesktopWindowRouter.openDockerCompatibilityTerminal()
+                    },
+                    TopBarMenuAction(
+                        title: DockerCompatibilityTerminalStrings.compatibleSystemTerminalTitle(language),
+                        systemImage: "macwindow"
+                    ) {
+                        ContainerDesktopWindowRouter.openDockerCompatibilitySystemTerminal()
+                    }
+                ]
+            )
 
             TopBarButton(
                 systemImage: "arrow.clockwise",
@@ -145,24 +157,141 @@ private struct TopBarButton: View {
 
     var body: some View {
         Button(action: action) {
-            Group {
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.white)
-                } else {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 17, weight: .semibold))
-                }
-            }
-            .foregroundStyle(.white)
-            .frame(width: 34, height: 34)
-            .background(.white.opacity(isDisabled ? 0.06 : 0.10), in: RoundedRectangle(cornerRadius: 8))
+            TopBarIconLabel(systemImage: systemImage, isLoading: isLoading, isDisabled: isDisabled)
         }
         .buttonStyle(.plain)
         .disabled(isDisabled || isLoading)
         .opacity(isDisabled ? 0.58 : 1)
         .help(help)
+    }
+}
+
+private struct TopBarMenuAction {
+    var title: String
+    var systemImage: String
+    var action: @MainActor () -> Void
+
+    init(title: String, systemImage: String, action: @escaping @MainActor () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.action = action
+    }
+}
+
+private struct TopBarMenuButton: View {
+    var systemImage: String
+    var help: String
+    var actions: [TopBarMenuAction]
+
+    var body: some View {
+        ZStack {
+            TopBarIconLabel(systemImage: systemImage)
+                .allowsHitTesting(false)
+
+            TopBarMenuHitTarget(actions: actions)
+                .frame(width: 34, height: 34)
+        }
+        .frame(width: 34, height: 34)
+        .fixedSize()
+        .help(help)
+    }
+}
+
+private struct TopBarMenuHitTarget: NSViewRepresentable {
+    var actions: [TopBarMenuAction]
+
+    func makeCoordinator() -> TopBarMenuHitTargetCoordinator {
+        TopBarMenuHitTargetCoordinator(actions: actions)
+    }
+
+    func makeNSView(context: Context) -> TopBarMenuHitTargetView {
+        let view = TopBarMenuHitTargetView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ nsView: TopBarMenuHitTargetView, context: Context) {
+        context.coordinator.actions = actions
+        nsView.coordinator = context.coordinator
+    }
+}
+
+private final class TopBarMenuHitTargetCoordinator: NSObject {
+    var actions: [TopBarMenuAction]
+
+    init(actions: [TopBarMenuAction]) {
+        self.actions = actions
+    }
+
+    func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        for (index, action) in actions.enumerated() {
+            let item = NSMenuItem(
+                title: action.title,
+                action: #selector(performAction(_:)),
+                keyEquivalent: ""
+            )
+            item.tag = index
+            item.target = self
+            item.image = NSImage(
+                systemSymbolName: action.systemImage,
+                accessibilityDescription: action.title
+            )
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func performAction(_ sender: NSMenuItem) {
+        guard actions.indices.contains(sender.tag) else { return }
+        let action = actions[sender.tag].action
+        Task { @MainActor in
+            action()
+        }
+    }
+}
+
+private final class TopBarMenuHitTargetView: NSView {
+    weak var coordinator: TopBarMenuHitTargetCoordinator?
+
+    override var isOpaque: Bool {
+        false
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let coordinator else {
+            super.mouseDown(with: event)
+            return
+        }
+        let menu = coordinator.makeMenu()
+        let location = convert(event.locationInWindow, from: nil)
+        menu.popUp(positioning: nil, at: location, in: self)
+    }
+}
+
+private struct TopBarIconLabel: View {
+    var systemImage: String
+    var isLoading = false
+    var isDisabled = false
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(width: 34, height: 34)
+        .background(.white.opacity(isDisabled ? 0.06 : 0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

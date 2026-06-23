@@ -7,6 +7,7 @@ struct ImageDetailPage: View {
     var reference: String
     @Binding var isPresented: Bool
     @Binding var showTasksDrawer: Bool
+    @Binding var resourceRoute: AppResourceRoute?
 
     @State private var detailStore: ImageDetailStore
 
@@ -15,13 +16,15 @@ struct ImageDetailPage: View {
         operationStore: AppOperationStore,
         reference: String,
         isPresented: Binding<Bool>,
-        showTasksDrawer: Binding<Bool>
+        showTasksDrawer: Binding<Bool>,
+        resourceRoute: Binding<AppResourceRoute?> = .constant(nil)
     ) {
         self.runtimeStore = runtimeStore
         self.operationStore = operationStore
         self.reference = reference
         _isPresented = isPresented
         _showTasksDrawer = showTasksDrawer
+        _resourceRoute = resourceRoute
         _detailStore = State(initialValue: ImageDetailStore(reference: reference))
     }
 
@@ -43,6 +46,17 @@ struct ImageDetailPage: View {
                             onRefresh: { refresh(image: image) },
                             onOpenTasks: { showTasksDrawer = true }
                         )
+
+                        ResourceAssociationsPanel(
+                            sections: ImageResourceAssociations.make(
+                                image: image,
+                                containers: runtimeStore.containers,
+                                operations: operationStore.records,
+                                language: language
+                            ).sections
+                        ) { route in
+                            resourceRoute = route
+                        }
 
                         ImageDetailTabBar(selection: $detailStore.selectedTab)
 

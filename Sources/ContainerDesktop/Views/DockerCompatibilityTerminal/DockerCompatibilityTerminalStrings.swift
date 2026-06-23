@@ -9,8 +9,8 @@ enum DockerCompatibilityTerminalStrings {
 
     static func settingsHeaderSubtitle(_ language: AppLanguage) -> String {
         language.resolved == .zhHans
-            ? "调整终端语言、输出缓存和外观。"
-            : "Adjust the terminal language, output buffer, and appearance."
+            ? "调整终端语言、系统终端打开方式、输出缓存和外观。"
+            : "Adjust the terminal language, system terminal app, output buffer, and appearance."
     }
 
     static func settingsMenuTitle(_ language: AppLanguage) -> String {
@@ -153,12 +153,78 @@ enum DockerCompatibilityTerminalStrings {
         language.resolved == .zhHans ? "打开 Docker 兼容终端" : "Open Docker compatibility terminal"
     }
 
+    static func openTerminalMenu(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "打开终端" : "Open terminal"
+    }
+
     static func languageTitle(_ language: AppLanguage) -> String {
         language.resolved == .zhHans ? "语言" : "Language"
     }
 
     static func languageSubtitle(_ language: AppLanguage) -> String {
         language.resolved == .zhHans ? "终端界面语言" : "Terminal interface language"
+    }
+
+    static func systemTerminalTitle(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "系统终端" : "System terminal"
+    }
+
+    static func compatibleSystemTerminalTitle(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "兼容系统终端" : "Compatible System Terminal"
+    }
+
+    static func systemTerminalSubtitle(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans
+            ? "选择打开兼容 shell 的终端 App，并管理全局 zsh 集成。"
+            : "Choose the terminal app used for compatible shells and manage global zsh integration."
+    }
+
+    static func systemTerminalOpenWith(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "打开方式" : "Open with"
+    }
+
+    static func systemDefaultTerminalApp(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "系统默认终端" : "System Default Terminal"
+    }
+
+    static func refreshTerminalApps(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "刷新终端列表" : "Refresh terminal list"
+    }
+
+    static func noOtherTerminalAppsFound(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "未检测到其他可打开 .command 脚本的终端 App。" : "No other terminal apps that can open .command scripts were found."
+    }
+
+    static func selectedTerminalAppUnavailable(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "所选终端 App 不可用" : "Selected terminal app is unavailable"
+    }
+
+    static func unavailableTerminalAppSuffix(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "不可用" : "Unavailable"
+    }
+
+    static func systemTerminalStatusInstalled(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "已启用" : "Enabled"
+    }
+
+    static func systemTerminalStatusMissing(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "未启用" : "Not enabled"
+    }
+
+    static func openCompatibleSystemTerminal(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "打开兼容系统终端" : "Open Compatible System Terminal"
+    }
+
+    static func installSystemTerminalIntegration(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "安装到系统终端" : "Install to System Terminal"
+    }
+
+    static func uninstallSystemTerminalIntegration(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "卸载集成" : "Uninstall Integration"
+    }
+
+    static func copyShimPathLabel(_ language: AppLanguage) -> String {
+        language.resolved == .zhHans ? "复制 shim PATH" : "Copy shim PATH"
     }
 
     static func outputBufferTitle(_ language: AppLanguage) -> String {

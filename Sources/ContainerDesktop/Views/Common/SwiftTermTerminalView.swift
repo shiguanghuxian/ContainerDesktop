@@ -18,10 +18,15 @@ struct SwiftTermTerminalView: NSViewRepresentable {
     var language: AppLanguage = .system
     var contextMenuActions: [TerminalContextMenuAction] = []
     var onSizeChange: (Int, Int) -> Void = { _, _ in }
+    var onCurrentDirectoryChange: (String?) -> Void = { _ in }
     var onInput: (Data) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onInput: onInput, onSizeChange: onSizeChange)
+        Coordinator(
+            onInput: onInput,
+            onSizeChange: onSizeChange,
+            onCurrentDirectoryChange: onCurrentDirectoryChange
+        )
     }
 
     func makeNSView(context: Context) -> FocusableTerminalView {
@@ -41,6 +46,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
     func updateNSView(_ terminalView: FocusableTerminalView, context: Context) {
         context.coordinator.onInput = onInput
         context.coordinator.onSizeChange = onSizeChange
+        context.coordinator.onCurrentDirectoryChange = onCurrentDirectoryChange
         context.coordinator.isInputEnabled = isInputEnabled
         terminalView.language = language
         terminalView.contextMenuActions = contextMenuActions
@@ -58,6 +64,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, TerminalViewDelegate {
         var onInput: (Data) -> Void
         var onSizeChange: (Int, Int) -> Void
+        var onCurrentDirectoryChange: (String?) -> Void
         var isInputEnabled = true
         weak var terminalView: TerminalView?
         private var lastOutputSequence = 0
@@ -67,9 +74,14 @@ struct SwiftTermTerminalView: NSViewRepresentable {
         private(set) var terminalRows = 0
         private var pendingSnapshotReplay: PendingSnapshotReplay?
 
-        init(onInput: @escaping (Data) -> Void, onSizeChange: @escaping (Int, Int) -> Void) {
+        init(
+            onInput: @escaping (Data) -> Void,
+            onSizeChange: @escaping (Int, Int) -> Void,
+            onCurrentDirectoryChange: @escaping (String?) -> Void = { _ in }
+        ) {
             self.onInput = onInput
             self.onSizeChange = onSizeChange
+            self.onCurrentDirectoryChange = onCurrentDirectoryChange
         }
 
         @objc @MainActor func focusTerminal() {
@@ -145,7 +157,9 @@ struct SwiftTermTerminalView: NSViewRepresentable {
 
         func setTerminalTitle(source: TerminalView, title: String) {}
 
-        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+            onCurrentDirectoryChange(directory)
+        }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
             guard isInputEnabled else { return }
@@ -230,7 +244,7 @@ struct SwiftTermTerminalView: NSViewRepresentable {
             MainActor.assumeIsolated {
                 terminalView.feed(text: "\u{1B}[2J\u{1B}[3J\u{1B}[H")
                 if !textSnapshot.isEmpty {
-                    terminalView.feed(text: textSnapshot)
+                    terminalView.feed(text: TerminalSnapshotReplayText.feedText(from: textSnapshot))
                 }
             }
             lastOutputSequence = outputSequence

@@ -3,6 +3,7 @@ import SwiftUI
 struct TerminalBlock: View {
     var text: String
     var minHeight: CGFloat = 180
+    var softWrap = true
 
     var body: some View {
         ScrollView {
@@ -10,7 +11,8 @@ struct TerminalBlock: View {
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .foregroundStyle(Color(red: 0.80, green: 0.94, blue: 0.88))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: !softWrap, vertical: false)
+                .frame(maxWidth: softWrap ? .infinity : nil, alignment: .leading)
                 .padding(14)
         }
         .thinScrollBars()

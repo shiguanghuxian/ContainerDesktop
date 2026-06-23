@@ -41,14 +41,31 @@ enum ContainerBrowserPortTargetSource: String, Codable, Hashable, Sendable {
 }
 
 struct ContainerBrowserPortTarget: Identifiable, Hashable, Sendable {
-    var id: String { url.absoluteString }
+    var id: String {
+        [
+            action.rawValue,
+            url?.absoluteString ?? copyValue ?? "",
+            "\(containerPort)",
+        ].joined(separator: "|")
+    }
+
     var title: String
-    var url: URL
+    var url: URL?
+    var copyValue: String?
+    var action: ContainerPortQuickActionKind
     var source: ContainerBrowserPortTargetSource
     var scheme: String
     var protocolName: String
+    var host: String
+    var port: Int
     var hostPort: Int?
     var containerPort: Int
+    var systemImage: String
+
+    var endpointText: String {
+        let displayHost = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        return "\(displayHost):\(port)"
+    }
 
     static func targets(from inspectText: String, container: ContainerSummary) -> [ContainerBrowserPortTarget] {
         guard let data = inspectText.data(using: .utf8),
@@ -64,36 +81,44 @@ struct ContainerBrowserPortTarget: Identifiable, Hashable, Sendable {
         var targets: [ContainerBrowserPortTarget] = []
 
         for mapping in mappings where mapping.protocolName == "tcp" {
-            if let hostPort = mapping.hostPort,
-               let url = makeURL(host: normalizedHostBindAddress(mapping.hostIP), port: hostPort) {
-                targets.append(ContainerBrowserPortTarget(
-                    title: "Host \(url.host ?? "127.0.0.1"):\(hostPort)",
-                    url: url,
+            if let hostPort = mapping.hostPort {
+                let endpoint = ContainerPortEndpoint(
+                    host: normalizedHostBindAddress(mapping.hostIP),
+                    port: hostPort,
                     source: .host,
-                    scheme: "http",
-                    protocolName: mapping.protocolName,
                     hostPort: hostPort,
-                    containerPort: mapping.containerPort
+                    containerPort: mapping.containerPort,
+                    protocolName: mapping.protocolName
+                )
+                targets.append(contentsOf: ContainerPortQuickActionCatalog.targets(
+                    imageName: container.imageName,
+                    containerPort: mapping.containerPort,
+                    protocolName: mapping.protocolName,
+                    endpoint: endpoint
                 ))
             }
 
-            if let containerHost,
-               let url = makeURL(host: containerHost, port: mapping.containerPort) {
-                targets.append(ContainerBrowserPortTarget(
-                    title: "Container \(containerHost):\(mapping.containerPort)",
-                    url: url,
+            if let containerHost {
+                let endpoint = ContainerPortEndpoint(
+                    host: containerHost,
+                    port: mapping.containerPort,
                     source: .container,
-                    scheme: "http",
-                    protocolName: mapping.protocolName,
                     hostPort: mapping.hostPort,
-                    containerPort: mapping.containerPort
+                    containerPort: mapping.containerPort,
+                    protocolName: mapping.protocolName
+                )
+                targets.append(contentsOf: ContainerPortQuickActionCatalog.targets(
+                    imageName: container.imageName,
+                    containerPort: mapping.containerPort,
+                    protocolName: mapping.protocolName,
+                    endpoint: endpoint
                 ))
             }
         }
 
-        var seenURLs: Set<String> = []
+        var seenIDs: Set<String> = []
         return targets.filter { target in
-            seenURLs.insert(target.url.absoluteString).inserted
+            seenIDs.insert(target.id).inserted
         }
     }
 
@@ -105,15 +130,6 @@ struct ContainerBrowserPortTarget: Identifiable, Hashable, Sendable {
         let values = ContainerPublishedPortMapping.mappings(from: value)
             .map(\.displayText)
         return values.isEmpty ? "No ports" : values.prefix(3).joined(separator: ", ")
-    }
-
-    private static func makeURL(host: String, port: Int) -> URL? {
-        guard (1...65_535).contains(port) else { return nil }
-        var components = URLComponents()
-        components.scheme = "http"
-        components.host = host
-        components.port = port
-        return components.url
     }
 
     private static func normalizedHostBindAddress(_ host: String?) -> String {
@@ -139,8 +155,42 @@ private struct ContainerPublishedPortMapping: Hashable, Sendable {
     }
 
     static func mappings(from value: JSONValue) -> [ContainerPublishedPortMapping] {
-        guard let object = rootObject(from: value),
-              let configuration = object.value(forAny: ["configuration", "Configuration"]),
+        guard let object = rootObject(from: value) else {
+            return []
+        }
+
+        var mappings: [ContainerPublishedPortMapping] = []
+        mappings.append(contentsOf: publishedPortMappings(from: object))
+        mappings.append(contentsOf: dockerNetworkPortMappings(from: object))
+        mappings.append(contentsOf: exposedPortMappings(from: object))
+
+        let boundContainerPorts = Set(
+            mappings.compactMap { mapping -> String? in
+                guard mapping.hostPort != nil else { return nil }
+                return "\(mapping.protocolName)|\(mapping.containerPort)"
+            }
+        )
+
+        var seen: Set<String> = []
+        return mappings.filter { mapping in
+            if mapping.hostPort == nil {
+                let key = "\(mapping.protocolName)|\(mapping.containerPort)"
+                if boundContainerPorts.contains(key) {
+                    return false
+                }
+            }
+            let key = [
+                mapping.protocolName,
+                mapping.hostIP ?? "",
+                mapping.hostPort.map(String.init) ?? "",
+                "\(mapping.containerPort)",
+            ].joined(separator: "|")
+            return seen.insert(key).inserted
+        }
+    }
+
+    private static func publishedPortMappings(from object: [String: JSONValue]) -> [ContainerPublishedPortMapping] {
+        guard let configuration = object.value(forAny: ["configuration", "Configuration"]),
               case .object(let config) = configuration,
               let publishedPorts = config.value(forAny: ["publishedPorts", "published_ports", "PublishedPorts"]),
               case .array(let ports) = publishedPorts else {
@@ -167,6 +217,113 @@ private struct ContainerPublishedPortMapping: Hashable, Sendable {
                 containerPort: containerPort
             )
         }
+    }
+
+    private static func dockerNetworkPortMappings(from object: [String: JSONValue]) -> [ContainerPublishedPortMapping] {
+        guard let networkSettings = object.object(forAny: ["NetworkSettings", "networkSettings", "network_settings"]),
+              let ports = networkSettings.object(forAny: ["Ports", "ports"]) else {
+            return []
+        }
+
+        var mappings: [ContainerPublishedPortMapping] = []
+        for portKey in ports.keys.sorted(by: portSortKey(_:_:)) {
+            guard let bindings = ports[portKey], let (containerPort, proto) = parsePortKey(portKey) else { continue }
+            switch bindings {
+            case .array(let values) where !values.isEmpty:
+                for value in values {
+                    guard case .object(let binding) = value else { continue }
+                    mappings.append(ContainerPublishedPortMapping(
+                        protocolName: proto,
+                        hostIP: binding.scalarText(forAny: ["HostIp", "HostIP", "hostIP", "hostIp", "host_ip", "IP"]),
+                        hostPort: binding.portValue(forAny: ["HostPort", "hostPort", "host_port", "publishedPort", "published"]),
+                        containerPort: containerPort
+                    ))
+                }
+            case .array, .null:
+                mappings.append(ContainerPublishedPortMapping(
+                    protocolName: proto,
+                    hostIP: nil,
+                    hostPort: nil,
+                    containerPort: containerPort
+                ))
+            default:
+                continue
+            }
+        }
+        return mappings
+    }
+
+    private static func exposedPortMappings(from object: [String: JSONValue]) -> [ContainerPublishedPortMapping] {
+        var mappings: [ContainerPublishedPortMapping] = []
+
+        if let configuration = object.object(forAny: ["configuration", "Configuration"]),
+           let exposedPorts = configuration.value(forAny: ["exposedPorts", "exposed_ports", "ExposedPorts"]) {
+            mappings.append(contentsOf: exposedPortMappings(from: exposedPorts))
+        }
+
+        if let config = object.object(forAny: ["Config", "config"]),
+           let exposedPorts = config.value(forAny: ["ExposedPorts", "exposedPorts", "exposed_ports"]) {
+            mappings.append(contentsOf: exposedPortMappings(from: exposedPorts))
+        }
+
+        return mappings
+    }
+
+    private static func exposedPortMappings(from value: JSONValue) -> [ContainerPublishedPortMapping] {
+        switch value {
+        case .object(let ports):
+            return ports.keys.sorted(by: portSortKey(_:_:)).compactMap(exposedPortMapping(from:))
+        case .array(let ports):
+            return ports.compactMap { value in
+                switch value {
+                case .string(let port):
+                    return exposedPortMapping(from: port)
+                case .object(let item):
+                    let proto = item.scalarText(forAny: ["protocol", "proto"])?.lowercased() ?? "tcp"
+                    guard let containerPort = item.portValue(forAny: ["containerPort", "container_port", "targetPort", "target", "port"]) else {
+                        return nil
+                    }
+                    return ContainerPublishedPortMapping(
+                        protocolName: proto,
+                        hostIP: nil,
+                        hostPort: nil,
+                        containerPort: containerPort
+                    )
+                default:
+                    return nil
+                }
+            }
+        default:
+            return []
+        }
+    }
+
+    private static func exposedPortMapping(from text: String) -> ContainerPublishedPortMapping? {
+        guard let (containerPort, proto) = parsePortKey(text) else { return nil }
+        return ContainerPublishedPortMapping(
+            protocolName: proto,
+            hostIP: nil,
+            hostPort: nil,
+            containerPort: containerPort
+        )
+    }
+
+    private static func parsePortKey(_ value: String) -> (Int, String)? {
+        let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
+        guard let portText = parts.first,
+              let port = Int(portText),
+              (1...65_535).contains(port) else {
+            return nil
+        }
+        let proto = parts.count > 1 ? parts[1].lowercased() : "tcp"
+        return (port, proto)
+    }
+
+    private static func portSortKey(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsPort = parsePortKey(lhs)?.0 ?? .max
+        let rhsPort = parsePortKey(rhs)?.0 ?? .max
+        if lhsPort != rhsPort { return lhsPort < rhsPort }
+        return lhs < rhs
     }
 
     private static func rootObject(from value: JSONValue) -> [String: JSONValue]? {
@@ -198,6 +355,14 @@ private extension Dictionary where Key == String, Value == JSONValue {
             if let value = self[key] { return value }
         }
         return nil
+    }
+
+    func object(forAny keys: [String]) -> [String: JSONValue]? {
+        guard let value = value(forAny: keys),
+              case .object(let object) = value else {
+            return nil
+        }
+        return object
     }
 
     func scalarText(forAny keys: [String]) -> String? {

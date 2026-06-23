@@ -69,14 +69,18 @@ final class AppUpdateStore {
     }
 
     var releaseNotesText: String? {
+        releaseNotesText(for: .en)
+    }
+
+    func releaseNotesText(for language: AppLanguage) -> String? {
         let notes: String
         switch status {
         case .upToDate(let release):
-            notes = release.releaseNotes
+            notes = release.releaseNotes.text(for: language)
         case .updateAvailable(let package), .downloading(let package, _), .installing(let package):
-            notes = package.releaseNotes
+            notes = package.releaseNotes(for: language)
         case .readyToInstall(let downloaded):
-            notes = downloaded.package.releaseNotes
+            notes = downloaded.package.releaseNotes(for: language)
         case .idle, .checking, .failed:
             return nil
         }

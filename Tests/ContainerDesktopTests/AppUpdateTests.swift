@@ -144,10 +144,73 @@ struct AppUpdateTests {
         #expect(release.versionText == "1.0.1")
         #expect(release.tagName == "1.0.1")
         #expect(release.htmlURL?.absoluteString == "https://github.com/shiguanghuxian/ContainerDesktop/releases/tag/1.0.1")
+        #expect(release.releaseNotes.text(for: .en) == "Release notes")
         let asset = try #require(release.compatibleAsset(for: .arm64))
         #expect(asset.name == "ContainerDesktop-1.0.1-100-arm64.zip")
         #expect(asset.downloadURL.absoluteString == "https://example.test/ContainerDesktop-1.0.1-100-arm64.zip")
         #expect(asset.normalizedSHA256 == "abcdef")
+    }
+
+    @Test("appcast manifest decodes localized release notes")
+    func appcastManifestDecodesLocalizedReleaseNotes() throws {
+        let release = try AppUpdateManifest.decodeRelease(from: Self.manifestData(
+            version: "1.0.1",
+            releaseNotesEN: "ContainerDesktop 1.0.1\n\nEnglish notes",
+            releaseNotesZHHans: "ContainerDesktop 1.0.1\n\n中文说明",
+            releaseNotes: "Legacy English"
+        ))
+
+        #expect(release.releaseNotes.text(for: .en) == "ContainerDesktop 1.0.1\n\nEnglish notes")
+        #expect(release.releaseNotes.text(for: .zhHans) == "ContainerDesktop 1.0.1\n\n中文说明")
+        #expect(release.releaseNotes.text(for: .system) == release.releaseNotes.text(for: AppLanguage.system.resolved))
+    }
+
+    @Test("legacy bilingual release notes split by section headers")
+    func legacyBilingualReleaseNotesSplitBySectionHeaders() throws {
+        let legacyNotes = """
+        ContainerDesktop 1.0.1
+
+        中文
+        中文第一行
+
+        中文第二行
+
+        English
+        English line one
+
+        English line two
+        """
+        let release = try AppUpdateManifest.decodeRelease(from: Self.manifestData(
+            version: "1.0.1",
+            releaseNotes: legacyNotes
+        ))
+
+        #expect(release.releaseNotes.text(for: .en) == """
+        ContainerDesktop 1.0.1
+
+        English line one
+
+        English line two
+        """)
+        #expect(release.releaseNotes.text(for: .zhHans) == """
+        ContainerDesktop 1.0.1
+
+        中文第一行
+
+        中文第二行
+        """)
+    }
+
+    @Test("legacy body falls back to english release notes")
+    func legacyBodyFallsBackToEnglishReleaseNotes() throws {
+        let release = try AppUpdateManifest.decodeRelease(from: Self.manifestData(
+            version: "1.0.1",
+            releaseNotes: nil,
+            body: "Legacy body release notes"
+        ))
+
+        #expect(release.releaseNotes.text(for: .en) == "Legacy body release notes")
+        #expect(release.releaseNotes.text(for: .zhHans) == "Legacy body release notes")
     }
 
     @Test("update check reports available and up to date")
@@ -368,6 +431,51 @@ struct AppUpdateTests {
         #expect(store.releaseNotesText?.hasSuffix("...") == false)
     }
 
+    @Test("store exposes release notes for selected language")
+    @MainActor
+    func storeExposesReleaseNotesForSelectedLanguage() async throws {
+        let release = Self.release(
+            version: "1.0.1",
+            releaseNotesByLanguage: AppUpdateReleaseNotes(
+                english: "English release notes",
+                simplifiedChinese: "中文发布说明"
+            )
+        )
+        let package = AppUpdatePackage(release: release, asset: release.assets[0])
+        let store = AppUpdateStore(
+            service: AppUpdateServiceStub(checkResult: .success(.updateAvailable(package))),
+            installer: AppUpdateInstallerStub(),
+            userDefaults: try Self.makeUserDefaults(),
+            openURL: { _ in },
+            terminateApplication: {}
+        )
+
+        await store.checkForUpdates(isAutomatic: false)
+
+        #expect(store.releaseNotesText == "English release notes")
+        #expect(store.releaseNotesText(for: .en) == "English release notes")
+        #expect(store.releaseNotesText(for: .zhHans) == "中文发布说明")
+        #expect(store.releaseNotesText(for: .system) == store.releaseNotesText(for: AppLanguage.system.resolved))
+    }
+
+    @Test("release notes fall back to English when localized text is empty")
+    func releaseNotesFallBackToEnglishWhenLocalizedTextIsEmpty() {
+        let notes = AppUpdateReleaseNotes(english: "English fallback", simplifiedChinese: "")
+
+        #expect(notes.text(for: .en) == "English fallback")
+        #expect(notes.text(for: .zhHans) == "English fallback")
+    }
+
+    @Test("package script writes localized appcast fields")
+    func packageScriptWritesLocalizedAppcastFields() throws {
+        let script = try String(contentsOfFile: "script/package_release.sh", encoding: .utf8)
+
+        #expect(script.contains("split_release_notes"))
+        #expect(script.contains(#""release_notes": release_notes_en"#))
+        #expect(script.contains(#""release_notes_en": release_notes_en"#))
+        #expect(script.contains(#""release_notes_zh_hans": release_notes_zh_hans"#))
+    }
+
     private static func makeService(
         manifestURL: URL = URL(string: "https://updates.example.test/appcast.json")!,
         statusCode: Int = 200,
@@ -414,14 +522,55 @@ struct AppUpdateTests {
         """
     }
 
-    private static func release(version: String, releaseNotes: String = "Release notes") -> AppUpdateRelease {
+    private static func manifestData(
+        version: String,
+        releaseNotesEN: String? = nil,
+        releaseNotesZHHans: String? = nil,
+        releaseNotes: String? = "Release notes",
+        body: String? = nil
+    ) throws -> Data {
+        var payload: [String: Any] = [
+            "version": version,
+            "tag_name": version,
+            "title": "ContainerDesktop \(version)",
+            "published_at": "2026-06-14T00:00:00Z",
+            "html_url": "https://github.com/shiguanghuxian/ContainerDesktop/releases/tag/\(version)",
+            "assets": [
+                "arm64": [
+                    "name": "ContainerDesktop-\(version)-100-arm64.zip",
+                    "download_url": "https://example.test/ContainerDesktop-\(version)-100-arm64.zip",
+                    "size": 123_456,
+                    "sha256": "abcdef",
+                ],
+            ],
+        ]
+        if let releaseNotesEN {
+            payload["release_notes_en"] = releaseNotesEN
+        }
+        if let releaseNotesZHHans {
+            payload["release_notes_zh_hans"] = releaseNotesZHHans
+        }
+        if let releaseNotes {
+            payload["release_notes"] = releaseNotes
+        }
+        if let body {
+            payload["body"] = body
+        }
+        return try JSONSerialization.data(withJSONObject: payload)
+    }
+
+    private static func release(
+        version: String,
+        releaseNotes: String = "Release notes",
+        releaseNotesByLanguage: AppUpdateReleaseNotes? = nil
+    ) -> AppUpdateRelease {
         AppUpdateRelease(
             version: SemanticVersion(version)!,
             versionText: version,
             tagName: version,
             title: "ContainerDesktop \(version)",
             publishedAt: nil,
-            releaseNotes: releaseNotes,
+            releaseNotes: releaseNotesByLanguage ?? AppUpdateReleaseNotes(legacy: releaseNotes),
             htmlURL: URL(string: "https://example.test/releases/\(version)")!,
             assets: [
                 AppUpdateAsset(

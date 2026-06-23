@@ -634,6 +634,7 @@ struct ComposeProject: Identifiable, Hashable, Sendable {
         var id: String { name }
         var name: String
         var image: String?
+        var containerName: String?
         var buildContext: String?
         var command: [String] = []
         var ports: [String] = []
