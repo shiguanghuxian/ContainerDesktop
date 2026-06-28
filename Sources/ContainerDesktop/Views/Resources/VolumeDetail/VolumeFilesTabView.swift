@@ -17,6 +17,7 @@ struct VolumeFilesTabView: View {
     @State private var isShowingCloneSheet = false
     @State private var cloneVolumeName = ""
     @State private var cloneVolumeSize = ""
+    @State private var previewFontSize = CodePreviewFontSize.defaultValue
 
     var body: some View {
         DetailSection(title: language.resolved == .zhHans ? "文件" : "Files") {
@@ -43,6 +44,14 @@ struct VolumeFilesTabView: View {
                     )
                 }
 
+                if let previewStatus = browserStore.previewStatusMessage {
+                    StatusBanner(
+                        text: previewStatus,
+                        systemImage: browserStore.previewIsError ? "exclamationmark.triangle" : "info.circle",
+                        tint: browserStore.previewIsError ? CDTheme.ember : CDTheme.dockerBlue
+                    )
+                }
+
                 if browserStore.isLoading {
                     HStack(spacing: 8) {
                         ProgressView()
@@ -55,33 +64,7 @@ struct VolumeFilesTabView: View {
                         Text(language.resolved == .zhHans ? "目录为空。" : "Directory is empty.")
                             .foregroundStyle(.secondary)
                     } else {
-                        VStack(spacing: 0) {
-                            ForEach(snapshot.entries.prefix(80)) { entry in
-                                VolumeFileRow(
-                                    entry: entry,
-                                    isDisabled: isFileActionDisabled,
-                                    onOpen: { openEntry(entry) },
-                                    onReveal: { revealEntry(entry) },
-                                    onRename: {
-                                        renameEntryName = entry.name
-                                        renameEntry = entry
-                                    },
-                                    onDelete: {
-                                        pendingDeleteEntry = entry
-                                    }
-                                )
-                                Divider()
-                            }
-                        }
-                        if snapshot.entries.count > 80 {
-                            Label(
-                                language.resolved == .zhHans ? "仅显示前 80 项，缩小目录后继续浏览。" : "Showing the first 80 items. Narrow the directory to inspect more.",
-                                systemImage: "line.3.horizontal.decrease.circle"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 6)
-                        }
+                        responsiveVolumeBrowser(snapshot)
                     }
                 } else {
                     Text(language.resolved == .zhHans ? "无法读取卷目录。" : "Unable to read volume directory.")
@@ -270,6 +253,113 @@ struct VolumeFilesTabView: View {
         browserStore.isLoading || browserStore.isFileOperationRunning || browserStore.isImportExportRunning
     }
 
+    private func responsiveVolumeBrowser(_ snapshot: VolumeDirectorySnapshot) -> some View {
+        GeometryReader { proxy in
+            let useCompactLayout = proxy.size.width < 920
+
+            Group {
+                if useCompactLayout {
+                    VStack(alignment: .leading, spacing: 12) {
+                        volumeFileList(snapshot)
+                            .frame(maxWidth: .infinity)
+                            .layoutPriority(2)
+                        previewPane
+                            .frame(maxWidth: .infinity, minHeight: 260)
+                            .layoutPriority(1)
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        volumeFileList(snapshot)
+                            .frame(maxWidth: .infinity)
+                            .layoutPriority(2)
+                        previewPane
+                            .frame(minWidth: 280, idealWidth: 360, maxWidth: 420)
+                            .layoutPriority(1)
+                    }
+                }
+            }
+            .frame(width: proxy.size.width, alignment: .topLeading)
+            .frame(minHeight: 420, alignment: .topLeading)
+        }
+        .frame(minHeight: 420)
+    }
+
+    private func volumeFileList(_ snapshot: VolumeDirectorySnapshot) -> some View {
+        VStack(spacing: 0) {
+            ForEach(snapshot.entries.prefix(80)) { entry in
+                VolumeFileRow(
+                    entry: entry,
+                    isSelected: browserStore.selectedFile?.id == entry.id,
+                    isDisabled: isFileActionDisabled,
+                    onOpen: { openEntry(entry) },
+                    onReveal: { revealEntry(entry) },
+                    onRename: {
+                        renameEntryName = entry.name
+                        renameEntry = entry
+                    },
+                    onDelete: {
+                        pendingDeleteEntry = entry
+                    }
+                )
+                Divider()
+            }
+
+            if snapshot.entries.count > 80 {
+                Label(
+                    language.resolved == .zhHans ? "仅显示前 80 项，缩小目录后继续浏览。" : "Showing the first 80 items. Narrow the directory to inspect more.",
+                    systemImage: "line.3.horizontal.decrease.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var previewPane: some View {
+        if let selectedFile = browserStore.selectedFile, !selectedFile.isDirectory {
+            FilePreviewCodePanel(
+                text: $browserStore.filePreviewText,
+                fontSize: $previewFontSize,
+                title: selectedFile.name,
+                subtitle: previewSubtitle(for: selectedFile),
+                fileName: selectedFile.url.path,
+                isEditable: false,
+                isDisabled: browserStore.isPreviewLoading,
+                isLoading: browserStore.isPreviewLoading
+            ) {
+                Label(language.resolved == .zhHans ? "只读" : "Read Only", systemImage: "lock")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+        } else {
+            FileBrowserFolderInfoPanel(
+                info: FileBrowserFolderInfo(
+                    path: browserStore.snapshot?.displayPath ?? "/",
+                    entries: browserStore.snapshot?.entries ?? [],
+                    sourceText: volumeFolderSourceText
+                )
+            )
+        }
+    }
+
+    private var volumeFolderSourceText: String {
+        if browserStore.snapshot?.isHostBacked == false {
+            return language.resolved == .zhHans ? "真实卷内文件" : "Container-backed volume"
+        }
+        return language.resolved == .zhHans ? "宿主机目录" : "Host-backed directory"
+    }
+
+    private func previewSubtitle(for entry: VolumeFileEntry) -> String {
+        guard let snapshot = browserStore.snapshot else { return entry.url.path }
+        let path = entry.url.path
+            .replacingOccurrences(of: snapshot.sourceURL.path, with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return path.isEmpty ? entry.name : "/\(path)"
+    }
+
     private var createFolderForm: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(language.resolved == .zhHans ? "新建目录" : "Create Folder")
@@ -329,13 +419,8 @@ struct VolumeFilesTabView: View {
     private func openEntry(_ entry: VolumeFileEntry) {
         if entry.isDirectory {
             Task { await browserStore.open(entry, volume: volume) }
-        } else if entry.isHostBacked {
-            NSWorkspace.shared.activateFileViewerSelecting([entry.url])
         } else {
-            browserStore.statusMessage = language.resolved == .zhHans
-                ? "真实卷内文件暂不支持直接在 Finder 预览。"
-                : "Files inside container-backed volumes cannot be previewed in Finder yet."
-            browserStore.isError = false
+            Task { await browserStore.preview(entry, volume: volume) }
         }
     }
 
@@ -396,6 +481,7 @@ struct VolumeFilesTabView: View {
 private struct VolumeFileRow: View {
     @Environment(\.appLanguage) private var language
     var entry: VolumeFileEntry
+    var isSelected = false
     var isDisabled = false
     var onOpen: () -> Void
     var onReveal: () -> Void
@@ -452,5 +538,7 @@ private struct VolumeFileRow: View {
             }
         }
         .padding(.vertical, 7)
+        .padding(.horizontal, 8)
+        .background(isSelected ? CDTheme.selectionSurface : .clear, in: RoundedRectangle(cornerRadius: 6))
     }
 }

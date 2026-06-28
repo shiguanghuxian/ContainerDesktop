@@ -8,8 +8,10 @@ struct SystemView: View {
     @State private var showPropertiesDrawer = false
     @State private var drawerMode: DetailDrawerMode = .overview
     @State private var isConfirmingCleanup = false
+    @State private var cleanupPlan = SystemCleanupPlan.safeDefault
     @State private var areComponentVersionsExpanded = false
-    private let systemPanelMinimumColumnWidth: CGFloat = 360
+    private let systemDashboardSpacing: CGFloat = 16
+    private let systemDashboardColumnMinimumWidth: CGFloat = 320
 
     var body: some View {
         DrawerPageLayout(isDrawerPresented: showPropertiesDrawer, onDismiss: {
@@ -34,13 +36,14 @@ struct SystemView: View {
                 )
             }
         }
-        .alert("安全清理缓存？", isPresented: $isConfirmingCleanup) {
-            Button("安全清理", role: .destructive) {
-                Task { await runtimeStore.cleanupCache() }
+        .alert(cleanupConfirmationTitle, isPresented: $isConfirmingCleanup) {
+            Button(cleanupConfirmationActionTitle, role: .destructive) {
+                let plan = cleanupPlan
+                Task { await runtimeStore.cleanupCache(plan: plan) }
             }
-            Button("取消", role: .cancel) {}
+            Button(localized("取消", "Cancel"), role: .cancel) {}
         } message: {
-            Text("将删除已停止的容器和 dangling/无标签镜像。不会删除卷，也不会删除正在被容器引用的镜像。")
+            Text(cleanupConfirmationMessage)
         }
     }
 
@@ -99,60 +102,108 @@ struct SystemView: View {
 
     private var systemPanels: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 16) {
-                    environmentPanel
-                    cleanupPanel
-                    configPanel
-                    runtimePropertiesPanel
-                }
-                .frame(minWidth: systemPanelMinimumColumnWidth, maxWidth: .infinity, alignment: .topLeading)
+            systemDashboardWideLayout
+            systemDashboardSingleColumnLayout
+        }
+    }
 
-                componentVersionsPanel
-                    .frame(minWidth: systemPanelMinimumColumnWidth, maxWidth: .infinity, alignment: .topLeading)
-            }
+    private var systemDashboardWideLayout: some View {
+        VStack(alignment: .leading, spacing: systemDashboardSpacing) {
+            systemDashboardTopRow
+            systemDashboardMiddleRow
+            systemDashboardBottomRow
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var systemDashboardTopRow: some View {
+        HStack(alignment: .top, spacing: systemDashboardSpacing) {
+            environmentPanel
+                .frame(minWidth: systemDashboardColumnMinimumWidth, maxWidth: .infinity, alignment: .topLeading)
+            componentVersionsPanel
+                .frame(minWidth: systemDashboardColumnMinimumWidth, maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var systemDashboardMiddleRow: some View {
+        cleanupPanel
             .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
 
-            VStack(alignment: .leading, spacing: 16) {
-                environmentPanel
-                componentVersionsPanel
-                cleanupPanel
-                configPanel
-                runtimePropertiesPanel
-            }
+    private var systemDashboardBottomRow: some View {
+        HStack(alignment: .top, spacing: systemDashboardSpacing) {
+            configPanel
+                .frame(minWidth: systemDashboardColumnMinimumWidth, maxWidth: .infinity, alignment: .topLeading)
+            runtimePropertiesPanel
+                .frame(minWidth: systemDashboardColumnMinimumWidth, maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var systemDashboardSingleColumnLayout: some View {
+        VStack(alignment: .leading, spacing: systemDashboardSpacing) {
+            environmentPanel
+            componentVersionsPanel
+            cleanupPanel
+            configPanel
+            runtimePropertiesPanel
         }
     }
 
     private var environmentPanel: some View {
         PanelView(title: language.t(.environment), subtitle: runtimeStore.statusTitle(language: language), systemImage: "desktopcomputer") {
-            VStack(alignment: .leading, spacing: 10) {
-                SystemStatusLine(title: "macOS", value: runtimeStore.environment.macOSVersion)
-                SystemStatusLine(title: "Architecture", value: runtimeStore.environment.architecture)
-                SystemStatusLine(
-                    title: "container",
-                    value: environmentComponentValue(
-                        id: ComponentVersionIDs.container,
-                        available: runtimeStore.environment.containerAvailable,
-                        rawVersion: runtimeStore.environment.containerVersion
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(runtimeStore.environment.systemRunning ? localized("引擎运行中", "Engine running") : localized("引擎未运行", "Engine stopped"))
+                            .font(.title3.weight(.semibold))
+                        Text(environmentSummaryText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    StatusPill(
+                        title: runtimeStore.environment.systemRunning ? language.t(.running) : language.t(.systemStopped),
+                        systemImage: runtimeStore.environment.systemRunning ? "checkmark.circle" : "stop.circle",
+                        tint: runtimeStore.environment.systemRunning ? CDTheme.lime : CDTheme.ember
                     )
-                )
-                SystemStatusLine(
-                    title: "container-compose",
-                    value: environmentComponentValue(
-                        id: ComponentVersionIDs.containerCompose,
-                        available: runtimeStore.environment.containerComposeAvailable,
-                        rawVersion: runtimeStore.environment.containerComposeVersion
+                }
+
+                Divider()
+
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 9) {
+                    SystemStatusLine(title: "macOS", value: runtimeStore.environment.macOSVersion)
+                    SystemStatusLine(title: "Architecture", value: runtimeStore.environment.architecture)
+                    SystemStatusLine(
+                        title: "container",
+                        value: environmentComponentValue(
+                            id: ComponentVersionIDs.container,
+                            available: runtimeStore.environment.containerAvailable,
+                            rawVersion: runtimeStore.environment.containerVersion
+                        )
                     )
-                )
-                SystemStatusLine(title: "system", value: runtimeStore.environment.systemRunning ? "running" : "stopped")
+                    SystemStatusLine(
+                        title: "container-compose",
+                        value: environmentComponentValue(
+                            id: ComponentVersionIDs.containerCompose,
+                            available: runtimeStore.environment.containerComposeAvailable,
+                            rawVersion: runtimeStore.environment.containerComposeVersion
+                        )
+                    )
+                }
             }
         }
     }
 
     private var componentVersionsPanel: some View {
         PanelView(title: localized("组件版本", "Component Versions"), subtitle: componentVersionSubtitle, systemImage: "number") {
+            componentVersionHeaderControls
+        } content: {
             VStack(alignment: .leading, spacing: 12) {
-                componentVersionCheckHeader
+                Text(localized("检查 CLI 与运行时组件版本，展开后查看来源和升级命令。", "Check CLI and runtime component versions. Expand to inspect sources and upgrade commands."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
 
                 if let message = runtimeStore.componentVersionErrorMessage?.nilIfBlank {
                     StatusBanner(text: message, systemImage: "exclamationmark.triangle", tint: CDTheme.ember)
@@ -171,27 +222,6 @@ struct SystemView: View {
                 }
             }
         }
-    }
-
-    private var componentVersionCheckHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                componentVersionCheckDescription
-                Spacer()
-                componentVersionHeaderControls
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                componentVersionCheckDescription
-                componentVersionHeaderControls
-            }
-        }
-    }
-
-    private var componentVersionCheckDescription: some View {
-        Text(localized("检查 container、container-compose 与运行时组件的最新版本。", "Check the latest versions for container, container-compose, and runtime components."))
-            .font(.callout)
-            .foregroundStyle(.secondary)
     }
 
     private var componentVersionHeaderControls: some View {
@@ -244,75 +274,40 @@ struct SystemView: View {
             statusMessage: runtimeStore.cleanupStatusMessage,
             isError: runtimeStore.cleanupStatusIsError,
             isRunning: runtimeStore.isCleanupRunning,
+            plan: $cleanupPlan,
             onCleanup: { isConfirmingCleanup = true }
         )
     }
 
     private var configPanel: some View {
-        PanelView(title: "container config.toml", subtitle: systemConfigStore.configPath, systemImage: "doc.badge.gearshape") {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    configPanelDescription
-                    Spacer()
-                    settingsButton
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    configPanelDescription
-                    settingsButton
-                }
-            }
-        }
-    }
-
-    private var configPanelDescription: some View {
-        Text(language.resolved == .zhHans ? "配置编辑已移到独立设置窗口，避免主窗口和设置窗口重复。" : "Configuration editing lives in the dedicated Settings window to avoid duplicate settings surfaces.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-    }
-
-    private var settingsButton: some View {
-        Button {
+        SystemActionPanel(
+            title: "container config.toml",
+            subtitle: systemConfigStore.configPath,
+            systemImage: "doc.badge.gearshape",
+            message: localized("默认资源、网络和运行时镜像在设置窗口统一管理。", "Manage default resources, network, and runtime images in Settings."),
+            actionTitle: language.t(.settings),
+            actionSystemImage: "gearshape",
+            actionHelp: language.t(.openSettings),
+            isProminent: true
+        ) {
             ContainerDesktopWindowRouter.openSettings()
-        } label: {
-            Label(language.t(.settings), systemImage: "gearshape")
         }
-        .buttonStyle(.borderedProminent)
-        .help(language.t(.openSettings))
     }
 
     private var runtimePropertiesPanel: some View {
-        PanelView(title: language.t(.runtimeProperties), subtitle: "container system property list --format json", systemImage: "doc.plaintext") {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    runtimePropertiesDescription
-                    Spacer()
-                    runtimePropertiesButton
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    runtimePropertiesDescription
-                    runtimePropertiesButton
-                }
-            }
-        }
-    }
-
-    private var runtimePropertiesDescription: some View {
-        Text(language.resolved == .zhHans ? "运行时属性可在右侧抽屉中查看解析概览和原始 JSON。" : "Runtime properties are available in the details drawer as parsed overview and raw JSON.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-    }
-
-    private var runtimePropertiesButton: some View {
-        Button {
+        SystemActionPanel(
+            title: language.t(.runtimeProperties),
+            subtitle: "container system property list --format json",
+            systemImage: "doc.plaintext",
+            message: localized("查看解析概览和原始 JSON，用于排查运行时状态。", "Inspect the parsed overview and raw JSON for runtime diagnostics."),
+            actionTitle: language.t(.details),
+            actionSystemImage: "sidebar.right",
+            actionHelp: localized("打开运行时属性抽屉", "Open runtime properties drawer"),
+            isProminent: false
+        ) {
             showPropertiesDrawer = true
             drawerMode = .overview
-        } label: {
-            Label(language.t(.details), systemImage: "sidebar.right")
         }
-        .buttonStyle(.borderedProminent)
-        .help(language.resolved == .zhHans ? "打开运行时属性抽屉" : "Open runtime properties drawer")
     }
 
     private var componentVersionSubtitle: String {
@@ -333,9 +328,43 @@ struct SystemView: View {
         return ComponentVersionParser.displayVersion(from: rawVersion) ?? "available"
     }
 
+    private var environmentSummaryText: String {
+        if !runtimeStore.environment.containerAvailable {
+            return localized("container CLI 缺失，部分功能不可用。", "container CLI is missing; some features are unavailable.")
+        }
+        if !runtimeStore.environment.systemRunning {
+            return localized("启动 system 后可管理本地资源。", "Start the system to manage local resources.")
+        }
+        return localized("CLI、系统服务和资源刷新已就绪。", "CLI, system service, and resource refresh are ready.")
+    }
+
     private func copyToPasteboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private var cleanupConfirmationTitle: String {
+        cleanupPlan.includesVolumes
+            ? localized("确认清理所选资源？", "Clean selected resources?")
+            : localized("安全清理缓存？", "Run safe cleanup?")
+    }
+
+    private var cleanupConfirmationActionTitle: String {
+        cleanupPlan.includesVolumes
+            ? localized("清理所选", "Clean Selected")
+            : localized("安全清理", "Safe Cleanup")
+    }
+
+    private var cleanupConfirmationMessage: String {
+        let names = cleanupPlan.categoryTitles(language: language).joined(separator: localized("、", ", "))
+        let estimate = cleanupPlan.estimatedReclaimableDisplay(in: runtimeStore.diskUsage)
+        let volumeWarning = cleanupPlan.includesVolumes
+            ? localized("包含未使用卷清理；未被容器引用的卷会被删除，请确认这些卷不再保存需要的数据。", "Unused volumes are included. Volumes not referenced by containers will be deleted, so confirm the data is no longer needed.")
+            : localized("不会删除卷，也不会删除正在被容器引用的镜像。", "Volumes and images referenced by containers are kept.")
+        return localized(
+            "将清理：\(names)。当前估算可释放 \(estimate)。\(volumeWarning)",
+            "Selected categories: \(names). Estimated reclaimable space: \(estimate). \(volumeWarning)"
+        )
     }
 
     private func localized(_ zh: String, _ en: String) -> String {
@@ -566,149 +595,82 @@ private struct ComponentVersionValue: View {
     }
 }
 
-private struct SystemCleanupPanel: View {
-    @Environment(\.appLanguage) private var language
-    var diskUsage: DiskUsageSummary?
-    var beforeDiskUsage: DiskUsageSummary?
-    var afterDiskUsage: DiskUsageSummary?
-    var statusMessage: String?
-    var isError: Bool
-    var isRunning: Bool
-    var onCleanup: () -> Void
-
-    var body: some View {
-        PanelView(
-            title: localized("缓存清理", "Cache Cleanup"),
-            subtitle: "container prune + container image prune",
-            systemImage: "trash"
-        ) {
-            VStack(alignment: .leading, spacing: 14) {
-                if let diskUsage {
-                    HStack(spacing: 12) {
-                        CleanupMetricTile(title: localized("总占用", "Total"), value: diskUsage.totalSizeDisplay)
-                        CleanupMetricTile(title: localized("可回收", "Reclaimable"), value: diskUsage.reclaimableDisplay)
-                        CleanupMetricTile(title: localized("容器可回收", "Containers"), value: diskUsage.containers.reclaimableDisplay)
-                        CleanupMetricTile(title: localized("镜像可回收", "Images"), value: diskUsage.images.reclaimableDisplay)
-                    }
-                } else {
-                    Text(localized("暂无磁盘使用数据，刷新后可查看可回收空间。", "Disk usage is unavailable. Refresh to inspect reclaimable space."))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let statusMessage {
-                    StatusBanner(
-                        text: statusMessage,
-                        systemImage: isError ? "exclamationmark.triangle" : "checkmark.circle",
-                        tint: isError ? CDTheme.ember : CDTheme.lime
-                    )
-                }
-
-                if let beforeDiskUsage, let afterDiskUsage {
-                    HStack(spacing: 10) {
-                        CleanupDeltaLabel(title: localized("清理前", "Before"), diskUsage: beforeDiskUsage)
-                        Image(systemName: "arrow.right")
-                            .foregroundStyle(.secondary)
-                        CleanupDeltaLabel(title: localized("清理后", "After"), diskUsage: afterDiskUsage)
-                    }
-                    .font(.caption)
-                }
-
-                HStack(spacing: 12) {
-                    Text(localized(
-                        "安全清理只删除已停止容器和 dangling/无标签镜像，不删除卷或已被容器引用的镜像。",
-                        "Safe cleanup removes stopped containers and dangling images only. Volumes and images referenced by containers are kept."
-                    ))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button {
-                        onCleanup()
-                    } label: {
-                        if isRunning {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text(localized("清理中", "Cleaning"))
-                            }
-                        } else {
-                            Label(localized("安全清理", "Safe Cleanup"), systemImage: "sparkles")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isRunning)
-                    .help(localized("安全清理缓存和未使用资源", "Safely clean caches and unused resources"))
-                }
-            }
-        }
-    }
-
-    private func localized(_ zh: String, _ en: String) -> String {
-        language.resolved == .zhHans ? zh : en
-    }
-}
-
-private struct CleanupMetricTile: View {
-    var title: String
-    var value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.title3.weight(.semibold).monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.76)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CDTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(CDTheme.separator)
-        }
-    }
-}
-
-private struct CleanupDeltaLabel: View {
-    var title: String
-    var diskUsage: DiskUsageSummary
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Text(diskUsage.reclaimableDisplay)
-                .font(.caption.monospacedDigit())
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(CDTheme.elevatedSurface, in: Capsule())
-        .overlay {
-            Capsule()
-                .strokeBorder(CDTheme.separator)
-        }
-    }
-}
-
 private struct SystemStatusLine: View {
     var title: String
     var value: String
 
     var body: some View {
-        HStack {
+        GridRow {
             Text(title)
                 .foregroundStyle(.secondary)
-            Spacer()
             Text(value)
                 .monospacedDigit()
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.callout)
+    }
+}
+
+private struct SystemActionPanel: View {
+    var title: String
+    var subtitle: String
+    var systemImage: String
+    var message: String
+    var actionTitle: String
+    var actionSystemImage: String
+    var actionHelp: String
+    var isProminent: Bool
+    var action: () -> Void
+
+    var body: some View {
+        PanelView(title: title, subtitle: subtitle, systemImage: systemImage) {
+            ViewThatFits(in: .horizontal) {
+                horizontalLayout
+                verticalLayout
+            }
+        }
+    }
+
+    private var horizontalLayout: some View {
+        HStack(alignment: .center, spacing: 14) {
+            messageText
+            Spacer(minLength: 12)
+            actionButton
+        }
+        .frame(minHeight: 54, alignment: .center)
+    }
+
+    private var verticalLayout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            messageText
+            actionButton
+        }
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+    }
+
+    private var messageText: some View {
+        Text(message)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var actionButton: some View {
+        Group {
+            if isProminent {
+                Button(action: action) {
+                    Label(actionTitle, systemImage: actionSystemImage)
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button(action: action) {
+                    Label(actionTitle, systemImage: actionSystemImage)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .help(actionHelp)
     }
 }
 

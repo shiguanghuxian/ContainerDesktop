@@ -67,6 +67,43 @@ struct ComposeAndVolumeOptionsTests {
         #expect(FileManager.default.fileExists(atPath: archive.path))
     }
 
+    @Test("volume file content previews host UTF-8 text and rejects unsafe or binary input")
+    func volumeFileContentPreviewsHostTextAndRejectsUnsafeOrBinaryInput() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let nested = root.appending(path: "config", directoryHint: .isDirectory)
+        let textFile = nested.appending(path: "app.env")
+        let binaryFile = root.appending(path: "archive.bin")
+        let outsideFile = fileManager.temporaryDirectory.appending(path: "\(UUID().uuidString)-outside.txt")
+        try fileManager.createDirectory(at: nested, withIntermediateDirectories: true)
+        try "APP_ENV=demo\n".write(to: textFile, atomically: true, encoding: .utf8)
+        try Data([0xff, 0xfe, 0x00]).write(to: binaryFile)
+        try "outside".write(to: outsideFile, atomically: true, encoding: .utf8)
+
+        let service = VolumeBrowserService()
+
+        #expect(try await service.fileContent(sourcePath: root.path, entryPath: textFile.path) == "APP_ENV=demo\n")
+
+        var rejectedOutside = false
+        do {
+            _ = try await service.fileContent(sourcePath: root.path, entryPath: outsideFile.path)
+        } catch {
+            rejectedOutside = true
+            #expect(error.localizedDescription.contains("目标路径超出卷目录"))
+        }
+
+        var rejectedBinary = false
+        do {
+            _ = try await service.fileContent(sourcePath: root.path, entryPath: binaryFile.path)
+        } catch {
+            rejectedBinary = true
+            #expect(error.localizedDescription.contains("UTF-8"))
+        }
+
+        #expect(rejectedOutside)
+        #expect(rejectedBinary)
+    }
+
     @Test("lists container backed volume files through transient container command")
     func listsContainerBackedVolumeFilesThroughTransientContainerCommand() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -110,6 +147,59 @@ struct ComposeAndVolumeOptionsTests {
         #expect(nested.entries.map(\.name) == ["app.env"])
         #expect(nested.entries[0].size == 7)
         #expect(!nested.entries[0].isHostBacked)
+    }
+
+    @Test("previews container backed volume file through transient container command")
+    func previewsContainerBackedVolumeFileThroughTransientContainerCommand() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fakeContainer = root.appending(path: "container")
+        let imageFile = root.appending(path: "volume.img")
+        let argumentsLog = root.appending(path: "arguments.log")
+        let standardInputLog = root.appending(path: "stdin.log")
+        try Data().write(to: imageFile)
+        try """
+        #!/bin/sh
+        for arg in "$@"; do
+          printf '%s\\n' "$arg"
+        done > "\(argumentsLog.path)"
+        cat > "\(standardInputLog.path)"
+        last=""
+        for arg in "$@"; do last="$arg"; done
+        if [ "$last" = "config/app.env" ]; then
+          printf 'APP_ENV=demo\\n'
+          exit 0
+        fi
+        printf 'missing: %s\\n' "$last" >&2
+        exit 66
+        """.write(to: fakeContainer, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeContainer.path)
+
+        let service = VolumeBrowserService(runner: CommandRunner(searchRoots: [root]))
+        let content = try await service.fileContent(
+            volumeName: "demo-volume",
+            sourcePath: imageFile.path,
+            entryPath: "/ContainerDesktopVolumes/demo-volume/config/app.env"
+        )
+
+        let arguments = try String(contentsOf: argumentsLog, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        let standardInput = try String(contentsOf: standardInputLog, encoding: .utf8)
+        #expect(content == "APP_ENV=demo\n")
+        #expect(arguments == [
+            "run",
+            "--rm",
+            "-i",
+            "-v",
+            "demo-volume:/mnt",
+            "docker.io/library/alpine:3.22",
+            "sh",
+            "-s",
+            "--",
+            "config/app.env",
+        ])
+        #expect(standardInput.contains("cat -- \"$entry\""))
     }
 
     @Test("clones and empties volume directories")
@@ -200,6 +290,42 @@ struct ComposeAndVolumeOptionsTests {
         #expect(store.isError == false)
         #expect(store.statusMessage?.contains("data") == true)
         #expect(store.snapshot?.entries.contains { $0.name == "data" && $0.isDirectory } == true)
+    }
+
+    @Test("volume browser store previews text and clears preview after reload")
+    @MainActor
+    func volumeBrowserStorePreviewsTextAndClearsPreviewAfterReload() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        try "hello\n".write(to: root.appending(path: "README.md"), atomically: true, encoding: .utf8)
+        let volume = VolumeSummary(configuration: .init(
+            name: "host-volume",
+            driver: "local",
+            format: "directory",
+            source: root.path,
+            creationDate: Date(),
+            labels: [:],
+            options: [:],
+            sizeInBytes: nil
+        ))
+        let store = VolumeBrowserStore()
+
+        await store.load(volume: volume)
+        let entry = try #require(store.snapshot?.entries.first { $0.name == "README.md" })
+        await store.preview(entry, volume: volume)
+
+        #expect(store.selectedFile == entry)
+        #expect(store.filePreviewText == "hello\n")
+        #expect(!store.isPreviewLoading)
+        #expect(store.previewStatusMessage == nil)
+        #expect(!store.previewIsError)
+
+        await store.load(volume: volume)
+
+        #expect(store.selectedFile == nil)
+        #expect(store.filePreviewText.isEmpty)
+        #expect(store.previewStatusMessage == nil)
     }
 
     @Test("volume browser store refreshes container backed snapshot after create directory")

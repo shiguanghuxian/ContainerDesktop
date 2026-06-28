@@ -100,68 +100,19 @@ struct SidebarView: View {
                         }
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.top, 2)
+                .padding(.bottom, 34)
             }
             .thinScrollBars()
-
-            Spacer(minLength: 0)
-
-            authorInfoCard
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(sidebarCardBackground, in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(CDTheme.separator)
-            }
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
         .frame(width: 260)
-    }
-
-    private var authorInfoCard: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(language.resolved == .zhHans ? "作者信息" : "Author")
-                .font(.caption2.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(CDTheme.cyan)
-
-            HStack(spacing: 8) {
-                Image(systemName: "person.crop.circle")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Text("时光弧线")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(primaryText)
-                    .lineLimit(1)
-            }
-
-            Link(destination: URL(string: "mailto:zuoxiupeng@live.com")!) {
-                authorLinkLabel(text: "zuoxiupeng@live.com", systemImage: "envelope")
-            }
-            .buttonStyle(.plain)
-            .help(language.resolved == .zhHans ? "发送邮件给作者" : "Email the author")
-
-            Link(destination: URL(string: "https://github.com/shiguanghuxian")!) {
-                authorLinkLabel(text: "github.com/shiguanghuxian", systemImage: "link")
-            }
-            .buttonStyle(.plain)
-            .help(language.resolved == .zhHans ? "打开作者 GitHub 主页" : "Open the author's GitHub profile")
+        .overlay(alignment: .bottom) {
+            SidebarAuthorInfoView()
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
         }
-    }
-
-    private func authorLinkLabel(text: String, systemImage: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-        .contentShape(Rectangle())
     }
 
     private var collapsedSidebar: some View {

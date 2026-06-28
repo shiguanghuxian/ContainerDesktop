@@ -29,6 +29,22 @@ struct ComposeViewNavigationTests {
         #expect(source.contains("StatusBanner(text: composeRegistrationHintText, systemImage: \"info.circle\""))
     }
 
+    @Test("compose project delete offers project-only and container cleanup choices")
+    func composeProjectDeleteOffersProjectOnlyAndContainerCleanupChoices() throws {
+        let source = try composeViewSource()
+
+        #expect(source.contains("Button(language.resolved == .zhHans ? \"仅移除项目\" : \"Remove project only\""))
+        #expect(source.contains("composeRemoveWithContainersButtonTitle(count: matchedContainers.count)"))
+        #expect(source.contains("removeComposeProjectOnly(project)"))
+        #expect(source.contains("removeComposeProjectAndContainers(project)"))
+        #expect(source.contains("composeMatchedContainers(for: project)"))
+        #expect(source.contains("runtimeStore.stopContainers(runningContainerIDs)"))
+        #expect(source.contains("runtimeStore.deleteContainers(containerIDs)"))
+        #expect(source.contains("不会删除 compose 文件、容器、镜像、卷或网络"))
+        #expect(source.contains("删除 Compose 项目 \\(project.name) 已中止"))
+        #expect(source.contains("cleanupRemovedComposeProject(project)"))
+    }
+
     private func composeViewSource() throws -> String {
         try String(
             contentsOfFile: "Sources/ContainerDesktop/Views/Compose/ComposeView.swift",

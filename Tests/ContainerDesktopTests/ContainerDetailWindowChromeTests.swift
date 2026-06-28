@@ -42,6 +42,28 @@ struct ContainerDetailWindowChromeTests {
         #expect(headerSource.contains("ViewThatFits(in: .horizontal)"))
     }
 
+    @Test("container files use shared code preview editor")
+    func containerFilesUseSharedCodePreviewEditor() throws {
+        let filesSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Resources/ContainerDetail/ContainerFilesTabView.swift",
+            encoding: .utf8
+        )
+        let editorSource = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Resources/ContainerDetail/MonospaceTextViews.swift",
+            encoding: .utf8
+        )
+
+        #expect(filesSource.contains("FilePreviewCodePanel("))
+        #expect(filesSource.contains("FileBrowserFolderInfoPanel("))
+        #expect(filesSource.contains("if let selectedFile = store.selectedFile, !selectedFile.isDirectory"))
+        #expect(filesSource.contains("previewFontSize"))
+        #expect(filesSource.contains("fileName: selectedFile.path"))
+        #expect(!filesSource.contains("TextEditor(text: $store.filePreviewText)"))
+        #expect(editorSource.contains("struct FilePreviewCodePanel<HeaderActions: View>: View"))
+        #expect(editorSource.contains("CodeFileEditorView("))
+        #expect(editorSource.contains("arrow.up.left.and.arrow.down.right"))
+    }
+
     @Test("container detail uses shared page scrolling")
     func containerDetailUsesSharedPageScrolling() throws {
         let containerDetailSource = try String(

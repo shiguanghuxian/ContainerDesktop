@@ -14,6 +14,7 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.2"),
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0"),
+        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", exact: "0.15.4"),
     ],
     targets: [
         .executableTarget(
@@ -22,6 +23,8 @@ let package = Package(
                 .product(name: "Yams", package: "Yams"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
+                .product(name: "CodeEditorView", package: "CodeEditorView"),
+                .product(name: "LanguageSupport", package: "CodeEditorView"),
             ],
             path: "Sources/ContainerDesktop"
         ),

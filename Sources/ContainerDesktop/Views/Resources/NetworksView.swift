@@ -162,9 +162,15 @@ struct NetworksView: View {
                     networkHeader
                 } rows: {
                     ForEach(filteredNetworks) { network in
-                        ResourceTableRow(isSelected: selectedName == network.name || detailName == network.name) {
+                        ResourceTableRow(
+                            isSelected: selectedName == network.name || detailName == network.name,
+                            onActivate: {
+                                openNetworkDetail(network)
+                            },
+                            activationHelp: language.resolved == .zhHans ? "打开网络详情" : "Open network details"
+                        ) {
                             let deleteKey = RuntimeOperationKey.networkDelete(network.name)
-                            networkRowMainButton(network)
+                            networkRowMainContent(network)
 
                             HStack(spacing: 8) {
                                 RowActionButton(
@@ -189,39 +195,32 @@ struct NetworksView: View {
         }
     }
 
-    private func networkRowMainButton(_ network: NetworkSummary) -> some View {
-        Button {
-            openNetworkDetail(network)
-        } label: {
-            HStack(spacing: 12) {
-                ResourceStatusDot(tint: .orange)
+    private func networkRowMainContent(_ network: NetworkSummary) -> some View {
+        HStack(spacing: 12) {
+            ResourceStatusDot(tint: .orange)
 
-                Text(network.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Text(network.name)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                StatusPill(title: network.configuration.mode, systemImage: "link", tint: .orange)
-                    .frame(width: 110, alignment: .leading)
+            StatusPill(title: network.configuration.mode, systemImage: "link", tint: .orange)
+                .frame(width: 110, alignment: .leading)
 
-                Text(network.ipv4ConfigurationText)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 170, alignment: .leading)
+            Text(network.ipv4ConfigurationText)
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 170, alignment: .leading)
 
-                Text(network.configuration.plugin)
-                    .lineLimit(1)
-                    .frame(width: 120, alignment: .leading)
+            Text(network.configuration.plugin)
+                .lineLimit(1)
+                .frame(width: 120, alignment: .leading)
 
-                Text(network.createdText)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 140, alignment: .leading)
-            }
-            .contentShape(Rectangle())
+            Text(network.createdText)
+                .foregroundStyle(.secondary)
+                .frame(width: 140, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .help(language.resolved == .zhHans ? "打开网络详情" : "Open network details")
     }
 
     private func openNetworkDetail(_ network: NetworkSummary) {

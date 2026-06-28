@@ -10,6 +10,7 @@ struct ContainerFilesTabView: View {
     @State private var renameEntry: ContainerFileEntry?
     @State private var renameName = ""
     @State private var pendingDelete: ContainerFileEntry?
+    @State private var previewFontSize = CodePreviewFontSize.defaultValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -380,43 +381,33 @@ struct ContainerFilesTabView: View {
         }
     }
 
+    @ViewBuilder
     private var previewPane: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(store.selectedFile?.displayName ?? (language.resolved == .zhHans ? "文件预览" : "Preview"))
-                        .font(.headline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(store.selectedFile?.path ?? (language.resolved == .zhHans ? "选择一个文件查看内容" : "Select a file to preview"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
+        if let selectedFile = store.selectedFile, !selectedFile.isDirectory {
+            FilePreviewCodePanel(
+                text: $store.filePreviewText,
+                fontSize: $previewFontSize,
+                title: selectedFile.displayName,
+                subtitle: selectedFile.path,
+                fileName: selectedFile.path,
+                isEditable: true,
+                isDisabled: store.isFileSaving
+            ) {
                 Button {
                     Task { await store.saveSelectedFile() }
                 } label: {
                     Label(language.t(.save), systemImage: "square.and.arrow.down")
                 }
-                .disabled(store.selectedFile == nil || store.selectedFile?.isDirectory == true || store.isFileSaving)
+                .disabled(store.isFileSaving)
                 .help(language.resolved == .zhHans ? "保存文件修改" : "Save file changes")
             }
-
-            TextEditor(text: $store.filePreviewText)
-                .font(.system(.caption, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .background(CDTheme.codeSurface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(CDTheme.separator)
-                }
-                .disabled(store.selectedFile == nil || store.selectedFile?.isDirectory == true)
-        }
-        .padding(12)
-        .background(CDTheme.panelSurface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(CDTheme.separator)
+        } else {
+            FileBrowserFolderInfoPanel(
+                info: FileBrowserFolderInfo(
+                    path: store.filePath,
+                    entries: store.fileEntries
+                )
+            )
         }
     }
 

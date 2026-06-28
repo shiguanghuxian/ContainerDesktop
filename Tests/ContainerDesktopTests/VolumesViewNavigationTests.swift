@@ -39,14 +39,14 @@ struct VolumesViewNavigationTests {
 
         #expect(source.contains("@State private var detailName: String?"))
         #expect(source.contains("VolumeDetailPage("))
-        #expect(source.contains("private func volumeRowMainButton(_ volume: VolumeSummary) -> some View"))
+        #expect(source.contains("private func volumeRowMainContent(_ volume: VolumeSummary) -> some View"))
+        #expect(!source.contains("private func volumeRowMainButton(_ volume: VolumeSummary) -> some View"))
         #expect(source.contains("private func openVolumeDetail(_ volume: VolumeSummary, selectedTab: VolumeDetailTab = .overview)"))
 
-        let rowButtonRange = try #require(source.range(of: "private func volumeRowMainButton"))
-        let rowButtonSnippet = String(source[rowButtonRange.lowerBound...].prefix(1_300))
-        #expect(rowButtonSnippet.contains("Button {"))
-        #expect(rowButtonSnippet.contains("openVolumeDetail(volume)"))
-        #expect(rowButtonSnippet.contains("Open volume details"))
+        let rowRange = try #require(source.range(of: "ResourceTableRow(\n                            isSelected: selectedName == volume.name || detailName == volume.name,"))
+        let rowSnippet = String(source[rowRange.lowerBound...].prefix(520))
+        #expect(rowSnippet.contains("onActivate: {\n                                openVolumeDetail(volume)"))
+        #expect(rowSnippet.contains("Open volume details"))
 
         let folderRange = try #require(source.range(of: "打开本地卷文件夹"))
         let folderSnippet = String(source[folderRange.lowerBound...].prefix(360))
@@ -67,6 +67,8 @@ struct VolumesViewNavigationTests {
     func volumeDrawerStaysLightweightAndFilesLiveInDetailPage() throws {
         let source = try volumesViewSource()
         let files = try readSource("Sources/ContainerDesktop/Views/Resources/VolumeDetail/VolumeFilesTabView.swift")
+        let store = try readSource("Sources/ContainerDesktop/Stores/VolumeBrowserStore.swift")
+        let service = try readSource("Sources/ContainerDesktop/Services/VolumeBrowserService.swift")
 
         #expect(source.contains("VolumeOverviewTabView(volume: selectedVolume)"))
         #expect(source.contains("VolumeMetadataTabView(volume: selectedVolume)"))
@@ -82,6 +84,19 @@ struct VolumesViewNavigationTests {
         #expect(files.contains("isDisabled: isFileActionDisabled"))
         #expect(files.contains("VolumeFileRow("))
         #expect(files.contains("isDisabled: isFileActionDisabled"))
+        #expect(files.contains("FilePreviewCodePanel("))
+        #expect(files.contains("FileBrowserFolderInfoPanel("))
+        #expect(files.contains("if let selectedFile = browserStore.selectedFile, !selectedFile.isDirectory"))
+        #expect(files.contains("fileName: selectedFile.url.path"))
+        #expect(files.contains("browserStore.preview(entry, volume: volume)"))
+        #expect(files.contains("browserStore.selectedFile"))
+        #expect(files.contains("browserStore.filePreviewText"))
+        #expect(files.contains("browserStore.isPreviewLoading"))
+        #expect(!files.contains("Files inside container-backed volumes cannot be previewed in Finder yet."))
+        #expect(store.contains("var selectedFile: VolumeFileEntry?"))
+        #expect(store.contains("var filePreviewText = \"\""))
+        #expect(store.contains("func preview(_ entry: VolumeFileEntry, volume: VolumeSummary) async"))
+        #expect(service.contains("func fileContent(volumeName: String, sourcePath: String, entryPath: String) async throws -> String"))
     }
 
     @Test("volume detail page contains header tabs files metadata and inspect")

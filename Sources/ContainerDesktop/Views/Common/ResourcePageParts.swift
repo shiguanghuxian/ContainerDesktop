@@ -67,24 +67,58 @@ struct ResourceTableHeaderLabel: View {
 }
 
 struct ResourceTableRow<Content: View>: View {
-    var isSelected = false
-    @ViewBuilder var content: Content
+    var isSelected: Bool
+    var onActivate: (() -> Void)?
+    var activationHelp: String?
+    private var content: Content
     @State private var isHovering = false
+
+    init(
+        isSelected: Bool = false,
+        onActivate: (() -> Void)? = nil,
+        activationHelp: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.isSelected = isSelected
+        self.onActivate = onActivate
+        self.activationHelp = activationHelp
+        self.content = content()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                content
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 54)
-            .background(rowBackground)
-            .contentShape(Rectangle())
-            .onHover { isHovering = $0 }
+            rowContent
 
             Divider()
                 .padding(.leading, 14)
         }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
+        ZStack {
+            rowBackground
+
+            if let onActivate {
+                Button(action: onActivate) {
+                    Rectangle()
+                        .fill(Color.clear)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel(Text(activationHelp ?? "Open"))
+                .help(activationHelp ?? "")
+            }
+
+            HStack(spacing: 12) {
+                content
+            }
+            .padding(.horizontal, 14)
+        }
+        .frame(height: 54)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
     }
 
     private var rowBackground: Color {

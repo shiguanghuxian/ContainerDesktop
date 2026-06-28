@@ -9,14 +9,14 @@ struct NetworksViewNavigationTests {
 
         #expect(source.contains("@State private var detailName: String?"))
         #expect(source.contains("NetworkDetailPage("))
-        #expect(source.contains("private func networkRowMainButton(_ network: NetworkSummary) -> some View"))
+        #expect(source.contains("private func networkRowMainContent(_ network: NetworkSummary) -> some View"))
+        #expect(!source.contains("private func networkRowMainButton(_ network: NetworkSummary) -> some View"))
         #expect(source.contains("private func openNetworkDetail(_ network: NetworkSummary)"))
 
-        let rowButtonRange = try #require(source.range(of: "private func networkRowMainButton"))
-        let rowButtonSnippet = String(source[rowButtonRange.lowerBound...].prefix(1_600))
-        #expect(rowButtonSnippet.contains("Button {"))
-        #expect(rowButtonSnippet.contains("openNetworkDetail(network)"))
-        #expect(rowButtonSnippet.contains("Open network details"))
+        let rowRange = try #require(source.range(of: "ResourceTableRow(\n                            isSelected: selectedName == network.name || detailName == network.name,"))
+        let rowSnippet = String(source[rowRange.lowerBound...].prefix(520))
+        #expect(rowSnippet.contains("onActivate: {\n                                openNetworkDetail(network)"))
+        #expect(rowSnippet.contains("Open network details"))
 
         let sidebarRange = try #require(source.range(of: "systemImage: \"sidebar.right\""))
         let sidebarSnippet = String(source[sidebarRange.lowerBound...].prefix(420))

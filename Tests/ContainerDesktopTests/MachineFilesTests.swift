@@ -4,6 +4,22 @@ import Testing
 
 @Suite("Machine files")
 struct MachineFilesTests {
+    @Test("machine files use shared code preview editor")
+    func machineFilesUseSharedCodePreviewEditor() throws {
+        let source = try String(
+            contentsOfFile: "Sources/ContainerDesktop/Views/Resources/MachineDetail/MachineFilesTabView.swift",
+            encoding: .utf8
+        )
+
+        #expect(source.contains("FilePreviewCodePanel("))
+        #expect(source.contains("FileBrowserFolderInfoPanel("))
+        #expect(source.contains("if let selectedFile = store.selectedFile, !selectedFile.isDirectory"))
+        #expect(source.contains("previewFontSize"))
+        #expect(source.contains("fileName: selectedFile.path"))
+        #expect(source.contains("isEditable: store.isSelectedFileEditable"))
+        #expect(!source.contains("TextEditor(text: $store.filePreviewText)"))
+    }
+
     @Test("machine file list uses machine run")
     func machineFileListUsesMachineRun() async throws {
         let fake = try FakeMachineFilesCLI()

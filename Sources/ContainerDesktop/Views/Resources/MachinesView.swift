@@ -190,23 +190,19 @@ struct MachinesView: View {
                     machineHeader
                 } rows: {
                     ForEach(filteredMachines) { machine in
-                        ResourceTableRow(isSelected: detailID == machine.id || drawerID == machine.id) {
-                            Button {
+                        ResourceTableRow(
+                            isSelected: detailID == machine.id || drawerID == machine.id,
+                            onActivate: {
                                 openMachineDetail(machine)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    ResourceStatusDot(tint: machine.isRunning ? CDTheme.lime : .secondary)
+                            },
+                            activationHelp: language.resolved == .zhHans ? "打开 Machine 详情" : "Open Machine details"
+                        ) {
+                            ResourceStatusDot(tint: machine.isRunning ? CDTheme.lime : .secondary)
 
-                                    Text(machine.id)
-                                        .font(.callout.weight(.medium))
-                                        .lineLimit(1)
-                                        .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                            .help(language.resolved == .zhHans ? "打开 Machine 详情" : "Open Machine details")
+                            Text(machine.id)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                                .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
 
                             CopyableIPAddressText(value: machine.ipAddressText)
                                 .frame(width: 116, alignment: .leading)

@@ -7,12 +7,14 @@ struct ImagesViewNavigationTests {
     func imageRowOpensDetailWhileSidebarActionOpensDrawerByEntry() throws {
         let source = try imagesViewSource()
 
-        let rowActionRange = try #require(source.range(of: "selectEntry(entry)"))
-        let rowSnippetStart = source.index(rowActionRange.lowerBound, offsetBy: -80, limitedBy: source.startIndex) ?? source.startIndex
-        let rowSnippetEnd = source.index(rowActionRange.upperBound, offsetBy: 80, limitedBy: source.endIndex) ?? source.endIndex
+        let rowActionRange = try #require(source.range(of: "ResourceTableRow(\n            isSelected: isEntrySelected(entry),"))
+        let rowSnippetStart = rowActionRange.lowerBound
+        let rowSnippetEnd = source.index(rowActionRange.upperBound, offsetBy: 420, limitedBy: source.endIndex) ?? source.endIndex
         let rowSnippet = String(source[rowSnippetStart..<rowSnippetEnd])
-        #expect(rowSnippet.contains("Button {"))
-        #expect(rowSnippet.contains("} label:"))
+        #expect(rowSnippet.contains("onActivate: {\n                selectEntry(entry)"))
+        #expect(rowSnippet.contains("activationHelp: imageRowActivationHelp(entry)"))
+        #expect(source.contains("private func imageRowMainContent(_ entry: ImageListEntry) -> some View"))
+        #expect(!source.contains("private func imageRowMainButton(_ entry: ImageListEntry) -> some View"))
 
         let sidebarRange = try #require(source.range(of: "systemImage: \"sidebar.right\""))
         let sidebarSnippet = String(source[sidebarRange.lowerBound...].prefix(420))
@@ -58,6 +60,18 @@ struct ImagesViewNavigationTests {
         #expect(source.contains("runtimeStore.deleteImages(resolvedReferences)"))
         #expect(source.contains("selectedImageReferences.subtract(result.deletedReferences)"))
         #expect(source.contains("imageDeleteCommandPreview(for: resolvedReferences)"))
+    }
+
+    @Test("images view confirms dangling image prune")
+    func imagesViewConfirmsDanglingImagePrune() throws {
+        let source = try imagesViewSource()
+
+        #expect(source.contains("@State private var isConfirmingPruneDanglingImages = false"))
+        #expect(source.contains("isConfirmingPruneDanglingImages = true"))
+        #expect(source.contains(".alert(language.resolved == .zhHans ? \"清理无标签镜像？\""))
+        #expect(source.contains("将删除 dangling/无标签镜像"))
+        #expect(source.contains("Button(language.resolved == .zhHans ? \"清理\" : \"Prune\", role: .destructive)"))
+        #expect(source.contains("pruneDanglingImages()"))
     }
 
     @Test("images view has registry filter controls")

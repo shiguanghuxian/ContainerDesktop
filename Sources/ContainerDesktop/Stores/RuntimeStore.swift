@@ -500,6 +500,13 @@ final class RuntimeStore {
         }
     }
 
+    @discardableResult
+    func deleteContainers(_ ids: [String]) async -> (succeeded: Bool, output: String) {
+        await performContainerBatch(title: "删除容器", ids: ids) {
+            try await client.deleteContainer($0)
+        }
+    }
+
     func deleteMachine(_ id: String) async {
         await perform("删除 Machine \(id)", operationKey: RuntimeOperationKey.machineDelete(id)) {
             try await client.deleteMachine(id)
@@ -699,10 +706,19 @@ final class RuntimeStore {
     }
 
     func cleanupCache() async {
+        await cleanupCache(plan: .safeDefault)
+    }
+
+    func cleanupCache(plan: SystemCleanupPlan) async {
         guard !isCleanupRunning else { return }
+        guard !plan.isEmpty else {
+            cleanupStatusIsError = true
+            cleanupStatusMessage = "请选择至少一个要清理的分类。"
+            return
+        }
 
         isCleanupRunning = true
-        busyMessage = "安全清理缓存"
+        busyMessage = cleanupRunningMessage(for: plan)
         errorMessage = nil
         cleanupStatusMessage = nil
         cleanupStatusIsError = false
@@ -714,14 +730,23 @@ final class RuntimeStore {
         }
 
         do {
-            _ = try await client.pruneStoppedContainers()
-            _ = try await client.pruneDanglingImages()
+            for category in plan.sortedCategories {
+                switch category {
+                case .stoppedContainers:
+                    _ = try await client.pruneStoppedContainers()
+                case .danglingImages:
+                    _ = try await client.pruneDanglingImages()
+                case .unusedVolumes:
+                    _ = try await client.pruneVolumes()
+                }
+            }
             await refreshCleanupResources()
             cleanupAfterDiskUsage = diskUsage
-            cleanupStatusMessage = cleanupSuccessMessage(before: cleanupBeforeDiskUsage, after: cleanupAfterDiskUsage)
+            cleanupStatusMessage = cleanupSuccessMessage(for: plan, before: cleanupBeforeDiskUsage, after: cleanupAfterDiskUsage)
         } catch {
             cleanupStatusIsError = true
-            cleanupStatusMessage = "安全清理失败：\(error.localizedDescription)"
+            let failureTitle = plan == .safeDefault ? "安全清理失败" : "清理失败"
+            cleanupStatusMessage = "\(failureTitle)：\(error.localizedDescription)"
             errorMessage = error.localizedDescription
             await refreshCleanupResources()
             cleanupAfterDiskUsage = diskUsage
@@ -1352,20 +1377,42 @@ final class RuntimeStore {
         if let latestImages = try? await client.listImages() {
             images = latestImages
         }
+        if let latestVolumes = try? await client.listVolumes() {
+            volumes = latestVolumes
+        }
         if let latestDiskUsage = try? await client.systemDF() {
             diskUsage = latestDiskUsage
         }
         lastUpdated = Date()
     }
 
-    private func cleanupSuccessMessage(before: DiskUsageSummary?, after: DiskUsageSummary?) -> String {
+    private func cleanupRunningMessage(for plan: SystemCleanupPlan) -> String {
+        if plan == .safeDefault {
+            return "安全清理缓存"
+        }
+        let categoryText = plan.sortedCategories.map { category in
+            switch category {
+            case .stoppedContainers:
+                return "停止容器"
+            case .danglingImages:
+                return "无标签镜像"
+            case .unusedVolumes:
+                return "未使用卷"
+            }
+        }
+            .joined(separator: "、")
+        return "清理 \(categoryText)"
+    }
+
+    private func cleanupSuccessMessage(for plan: SystemCleanupPlan, before: DiskUsageSummary?, after: DiskUsageSummary?) -> String {
+        let title = plan == .safeDefault ? "安全清理完成" : "清理完成"
         guard let before, let after else {
-            return "安全清理完成，已刷新本地资源。"
+            return "\(title)，已刷新本地资源。"
         }
 
         let reclaimed = max(before.totalSizeInBytes - after.totalSizeInBytes, 0)
         let reclaimedText = ByteCountFormatter.string(fromByteCount: reclaimed, countStyle: .file)
-        return "安全清理完成，释放约 \(reclaimedText)。可回收空间从 \(before.reclaimableDisplay) 更新为 \(after.reclaimableDisplay)。"
+        return "\(title)，释放约 \(reclaimedText)。可回收空间从 \(before.reclaimableDisplay) 更新为 \(after.reclaimableDisplay)。"
     }
 
     func restartContainer(_ id: String) async {
@@ -1517,6 +1564,8 @@ final class RuntimeStore {
                     verb = "stop"
                 } else if title.hasPrefix("重启") {
                     verb = "restart"
+                } else if title.hasPrefix("删除") {
+                    verb = "delete"
                 } else {
                     verb = "unknown"
                 }

@@ -8,6 +8,7 @@ enum VolumeBrowserError: LocalizedError, Sendable {
     case destinationExists
     case pathEscapesVolume
     case notDirectory
+    case notPreviewableTextFile
     case containerVolumeArchiveUnsupported
 
     var errorDescription: String? {
@@ -26,6 +27,8 @@ enum VolumeBrowserError: LocalizedError, Sendable {
             return "目标路径超出卷目录。"
         case .notDirectory:
             return "目标不是目录。"
+        case .notPreviewableTextFile:
+            return "该文件不能作为 UTF-8 文本预览。"
         case .containerVolumeArchiveUnsupported:
             return "该卷来源是 ext4 镜像文件，当前仅支持目录浏览、创建目录、重命名、删除、清空和克隆；导入/导出归档暂未支持。"
         }
@@ -123,6 +126,43 @@ struct VolumeBrowserService: Sendable {
             arguments: ["-C", sourceURL.path, "-xf", archivePath],
             timeout: 1800
         ).combinedOutput
+    }
+
+    func fileContent(volumeName: String, sourcePath: String, entryPath: String) async throws -> String {
+        if isHostDirectory(sourcePath) {
+            return try await fileContent(sourcePath: sourcePath, entryPath: entryPath)
+        }
+
+        let entryRelativePath = try containerEntryRelativePath(volumeName: volumeName, entryPath: entryPath)
+        let result = try await runSingleVolumeCommand(volumeName: volumeName, arguments: [entryRelativePath], script: """
+        set -eu
+        rel="$1"
+        entry="/mnt/$rel"
+        if [ ! -f "$entry" ] && [ ! -L "$entry" ]; then
+          printf '文件不存在或不是普通文件：%s\\n' "$entry" >&2
+          exit 66
+        fi
+        cat -- "$entry"
+        """)
+        return result.stdout
+    }
+
+    func fileContent(sourcePath: String, entryPath: String) async throws -> String {
+        let sourceURL = URL(fileURLWithPath: sourcePath, isDirectory: true).standardizedFileURL
+        _ = try list(sourcePath: sourceURL.path)
+        let entryURL = try entryURL(sourceURL: sourceURL, entryPath: entryPath)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: entryURL.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            throw VolumeBrowserError.notPreviewableTextFile
+        }
+        let data = try await Task.detached(priority: .userInitiated) {
+            try Data(contentsOf: entryURL)
+        }.value
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw VolumeBrowserError.notPreviewableTextFile
+        }
+        return text
     }
 
     func createDirectory(volumeName: String, sourcePath: String, relativePath: String, name: String) async throws -> String {

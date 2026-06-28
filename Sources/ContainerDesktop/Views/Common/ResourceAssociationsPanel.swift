@@ -1,17 +1,28 @@
 import AppKit
 import SwiftUI
 
+enum ResourceAssociationOperationsDisplayMode {
+    case inline
+    case popover
+}
+
 struct ResourceAssociationsPanel: View {
     @Environment(\.appLanguage) private var language
     var sections: [ResourceAssociationSection]
+    var operationsDisplayMode: ResourceAssociationOperationsDisplayMode = .inline
     var onRoute: (AppResourceRoute) -> Void = { _ in }
+
+    @State private var showOperationsPopover = false
 
     var body: some View {
         if !sections.isEmpty {
             PanelView(
                 title: language.resolved == .zhHans ? "关联与快捷操作" : "Related Resources",
                 subtitle: language.resolved == .zhHans ? "当前上下文里的资源、命令和复制入口" : "Resources, commands, and copy actions for this context",
-                systemImage: "link"
+                systemImage: "link",
+                headerAccessory: {
+                    panelHeaderAccessory
+                }
             ) {
                 VStack(spacing: 10) {
                     ForEach(portSections) { section in
@@ -35,7 +46,20 @@ struct ResourceAssociationsPanel: View {
     }
 
     private var standardSections: [ResourceAssociationSection] {
-        sections.filter { $0.id != "ports" }
+        sections.filter { section in
+            section.id != "ports" && (operationsDisplayMode == .inline || section.id != "operations")
+        }
+    }
+
+    private var operationSection: ResourceAssociationSection? {
+        sections.first { $0.id == "operations" }
+    }
+
+    @ViewBuilder
+    private var panelHeaderAccessory: some View {
+        if operationsDisplayMode == .popover, let operationSection {
+            operationsPopoverButton(operationSection)
+        }
     }
 
     private func associationSection(_ section: ResourceAssociationSection) -> some View {
@@ -70,6 +94,53 @@ struct ResourceAssociationsPanel: View {
             RoundedRectangle(cornerRadius: 8)
             .strokeBorder(CDTheme.separator)
         }
+    }
+
+    private func operationsPopoverButton(_ section: ResourceAssociationSection) -> some View {
+        Button {
+            showOperationsPopover.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: section.systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(section.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text("\(section.items.count)")
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(CDTheme.dockerBlue)
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background(CDTheme.inputSurface, in: RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(CDTheme.separator)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(section.title)
+        .accessibilityLabel(section.title)
+        .popover(isPresented: $showOperationsPopover, arrowEdge: .top) {
+            operationsPopover(section)
+        }
+    }
+
+    private func operationsPopover(_ section: ResourceAssociationSection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            associationHeader(section)
+
+            Divider()
+
+            VStack(spacing: 6) {
+                ForEach(section.items.prefix(5)) { item in
+                    associationItem(item)
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 330)
     }
 
     private func portAssociationSection(_ section: ResourceAssociationSection) -> some View {

@@ -96,7 +96,10 @@ struct ContainerDetailPage: View {
                 onDelete: { isConfirmingDelete = true }
             )
 
-            ResourceAssociationsPanel(sections: associations(for: container).sections) { route in
+            ResourceAssociationsPanel(
+                sections: associations(for: container).sections,
+                operationsDisplayMode: .popover
+            ) { route in
                 resourceRoute = route
             }
 

@@ -24,4 +24,58 @@ struct MonospaceTextViewScrollTests {
         #expect(MonospaceTextScrollBehavior.clampedOriginY(460, visibleHeight: 100, documentHeight: 500) == 400)
         #expect(MonospaceTextScrollBehavior.clampedOriginY(40, visibleHeight: 100, documentHeight: 80) == 0)
     }
+
+    @Test("forwards unconsumed vertical scroll for short documents")
+    func forwardsUnconsumedVerticalScrollForShortDocuments() {
+        #expect(MonospaceTextScrollBehavior.shouldForwardUnconsumedVerticalScroll(
+            verticalDelta: 8,
+            visibleOriginY: 0,
+            visibleHeight: 100,
+            documentHeight: 80,
+            movedVertically: false
+        ))
+    }
+
+    @Test("forwards unconsumed vertical scroll at document boundaries")
+    func forwardsUnconsumedVerticalScrollAtDocumentBoundaries() {
+        #expect(MonospaceTextScrollBehavior.shouldForwardUnconsumedVerticalScroll(
+            verticalDelta: 8,
+            visibleOriginY: 0,
+            visibleHeight: 100,
+            documentHeight: 500,
+            movedVertically: false
+        ))
+        #expect(MonospaceTextScrollBehavior.shouldForwardUnconsumedVerticalScroll(
+            verticalDelta: -8,
+            visibleOriginY: 400,
+            visibleHeight: 100,
+            documentHeight: 500,
+            movedVertically: false
+        ))
+    }
+
+    @Test("keeps consumed or non-boundary vertical scroll inside the text view")
+    func keepsConsumedOrNonBoundaryVerticalScrollInsideTextView() {
+        #expect(!MonospaceTextScrollBehavior.shouldForwardUnconsumedVerticalScroll(
+            verticalDelta: 8,
+            visibleOriginY: 160,
+            visibleHeight: 100,
+            documentHeight: 500,
+            movedVertically: false
+        ))
+        #expect(!MonospaceTextScrollBehavior.shouldForwardUnconsumedVerticalScroll(
+            verticalDelta: 8,
+            visibleOriginY: 0,
+            visibleHeight: 100,
+            documentHeight: 500,
+            movedVertically: true
+        ))
+        #expect(!MonospaceTextScrollBehavior.shouldForwardUnconsumedVerticalScroll(
+            verticalDelta: 0,
+            visibleOriginY: 0,
+            visibleHeight: 100,
+            documentHeight: 500,
+            movedVertically: false
+        ))
+    }
 }

@@ -237,27 +237,23 @@ struct ContainersView: View {
                     containerHeader
                 } rows: {
                     ForEach(filteredContainers) { container in
-                        ResourceTableRow(isSelected: detailID == container.id || drawerID == container.id) {
-                            Button {
+                        ResourceTableRow(
+                            isSelected: detailID == container.id || drawerID == container.id,
+                            onActivate: {
                                 openContainerDetail(container)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    ResourceStatusDot(tint: container.state == "running" ? CDTheme.lime : .secondary)
+                            },
+                            activationHelp: language.resolved == .zhHans ? "打开容器详情" : "Open container details"
+                        ) {
+                            ResourceStatusDot(tint: container.state == "running" ? CDTheme.lime : .secondary)
 
-                                    Text(container.id)
-                                        .font(.callout.weight(.medium))
-                                        .lineLimit(1)
-                                        .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+                            Text(container.id)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                                .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
 
-                                    Text(container.imageName)
-                                        .lineLimit(1)
-                                        .frame(width: 180, alignment: .leading)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                            .help(language.resolved == .zhHans ? "打开容器详情" : "Open container details")
+                            Text(container.imageName)
+                                .lineLimit(1)
+                                .frame(width: 180, alignment: .leading)
 
                             HStack(spacing: 6) {
                                 CopyableIPAddressText(value: container.primaryIP)

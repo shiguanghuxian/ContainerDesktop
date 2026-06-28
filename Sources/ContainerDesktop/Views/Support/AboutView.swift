@@ -238,7 +238,7 @@ struct AboutView: View {
                 )
                 SupportFeatureCard(
                     title: localized("安全优先的清理策略", "Safety-first cleanup"),
-                    message: localized("缓存清理默认只清停止容器和 dangling 镜像，不删除 volume。", "Cache cleanup prunes stopped containers and dangling images by default, without deleting volumes."),
+                    message: localized("空间清理默认只清停止容器和 dangling 镜像；未使用卷需要用户手动勾选确认。", "Space cleanup prunes stopped containers and dangling images by default; unused volumes require an explicit user selection."),
                     systemImage: "sparkles",
                     tint: CDTheme.cyan
                 )

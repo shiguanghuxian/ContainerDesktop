@@ -151,19 +151,24 @@ struct ComposeView: View {
         .onChange(of: resourceRoute) { _, route in
             consumeResourceRoute(route)
         }
-        .alert("移除 Compose 项目？", isPresented: Binding(
+        .alert(composeRemoveAlertTitle, isPresented: Binding(
             get: { pendingRemove != nil },
             set: { if !$0 { pendingRemove = nil } }
         )) {
             if let project = pendingRemove {
-                Button(language.t(.remove), role: .destructive) {
-                    composeStore.removeProject(project)
-                    pendingRemove = nil
+                Button(language.resolved == .zhHans ? "仅移除项目" : "Remove project only", role: .destructive) {
+                    removeComposeProjectOnly(project)
+                }
+                let matchedContainers = composeMatchedContainers(for: project)
+                if !matchedContainers.isEmpty {
+                    Button(composeRemoveWithContainersButtonTitle(count: matchedContainers.count), role: .destructive) {
+                        removeComposeProjectAndContainers(project)
+                    }
                 }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("只会从 \(AppBranding.displayName) 列表中移除 \(pendingRemove?.name ?? "该项目")，不会删除文件。")
+            Text(composeRemoveAlertMessage)
         }
     }
 
@@ -617,6 +622,104 @@ struct ComposeView: View {
                 ? "找不到 Compose 文件所在文件夹：\(folderURL.path)"
                 : "Unable to find the Compose file folder: \(folderURL.path)"
         }
+    }
+
+    private var composeRemoveAlertTitle: String {
+        language.resolved == .zhHans ? "删除 Compose 项目？" : "Delete Compose project?"
+    }
+
+    private var composeRemoveAlertMessage: String {
+        guard let project = pendingRemove else {
+            return language.resolved == .zhHans
+                ? "将从 \(AppBranding.displayName) 列表中移除该项目。"
+                : "This removes the project from the \(AppBranding.displayName) list."
+        }
+
+        let containerCount = composeMatchedContainers(for: project).count
+        return language.resolved == .zhHans
+            ? "项目：\(project.name)\n当前匹配容器：\(containerCount) 个。\n仅移除项目不会删除 compose 文件、容器、镜像、卷或网络；同时删除会先停止并删除匹配容器，然后移除项目。"
+            : "Project: \(project.name)\nMatched containers: \(containerCount).\nRemoving the project only does not delete the compose file, containers, images, volumes, or networks. Deleting with containers stops and deletes matched containers first, then removes the project."
+    }
+
+    private func composeRemoveWithContainersButtonTitle(count: Int) -> String {
+        language.resolved == .zhHans ? "停止并删除 \(count) 个容器" : "Stop and delete \(count) containers"
+    }
+
+    private func removeComposeProjectOnly(_ project: ComposeProject) {
+        composeStore.removeProject(project)
+        cleanupRemovedComposeProject(project)
+        pendingRemove = nil
+    }
+
+    private func removeComposeProjectAndContainers(_ project: ComposeProject) {
+        let matchedContainers = composeMatchedContainers(for: project)
+        let containerIDs = matchedContainers.map(\.id)
+        let runningContainerIDs = matchedContainers
+            .filter { $0.state == "running" }
+            .map(\.id)
+        pendingRemove = nil
+
+        guard !containerIDs.isEmpty else {
+            removeComposeProjectOnly(project)
+            return
+        }
+
+        composeStore.errorMessage = nil
+        composeStore.lastOutput = language.resolved == .zhHans
+            ? "正在停止并删除 Compose 项目 \(project.name) 的 \(containerIDs.count) 个容器..."
+            : "Stopping and deleting \(containerIDs.count) containers for Compose project \(project.name)..."
+
+        Task {
+            if !runningContainerIDs.isEmpty {
+                let stopResult = await runtimeStore.stopContainers(runningContainerIDs)
+                guard stopResult.succeeded else {
+                    let output = language.resolved == .zhHans
+                        ? "删除 Compose 项目 \(project.name) 已中止：停止运行中容器失败。\n\(stopResult.output)"
+                        : "Deleting Compose project \(project.name) was aborted because running containers could not be stopped.\n\(stopResult.output)"
+                    composeStore.errorMessage = output
+                    composeStore.lastOutput = output
+                    await runtimeStore.refreshAll()
+                    return
+                }
+            }
+
+            let deleteResult = await runtimeStore.deleteContainers(containerIDs)
+            guard deleteResult.succeeded else {
+                let output = language.resolved == .zhHans
+                    ? "删除 Compose 项目 \(project.name) 已中止：删除匹配容器失败。\n\(deleteResult.output)"
+                    : "Deleting Compose project \(project.name) was aborted because matched containers could not be deleted.\n\(deleteResult.output)"
+                composeStore.errorMessage = output
+                composeStore.lastOutput = output
+                await runtimeStore.refreshAll()
+                return
+            }
+
+            composeStore.removeProject(project)
+            cleanupRemovedComposeProject(project)
+            composeStore.errorMessage = nil
+            composeStore.lastOutput = language.resolved == .zhHans
+                ? "\(deleteResult.output)\n已从列表移除 Compose 项目 \(project.name)。"
+                : "\(deleteResult.output)\nRemoved Compose project \(project.name) from the list."
+        }
+    }
+
+    private func cleanupRemovedComposeProject(_ project: ComposeProject) {
+        expandedProjectIDs.remove(project.id)
+        if activeDrawer == .project(project.id) {
+            closeActiveDrawer()
+        }
+    }
+
+    private func composeMatchedContainers(for project: ComposeProject) -> [ContainerSummary] {
+        var seenIDs = Set<String>()
+        return project.runtimeSummaries(containers: runtimeStore.containers)
+            .flatMap(\.containers)
+            .filter { container in
+                let id = container.id.trimmed
+                guard !id.isEmpty, !seenIDs.contains(id) else { return false }
+                seenIDs.insert(id)
+                return true
+            }
     }
 
     private func rawComposeText(for project: ComposeProject) -> String {

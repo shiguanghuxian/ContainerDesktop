@@ -47,6 +47,7 @@ struct ImagesView: View {
     @State private var detailReference: String?
     @State private var selectedImageReferences = Set<String>()
     @State private var pendingDeleteRequest: ImageDeleteRequest?
+    @State private var isConfirmingPruneDanglingImages = false
     @State private var showPullPopover = false
     @State private var showBuildPopover = false
     @State private var showTagPopover = false
@@ -249,6 +250,14 @@ struct ImagesView: View {
         } message: {
             Text(deleteAlertMessage)
         }
+        .alert(language.resolved == .zhHans ? "清理无标签镜像？" : "Prune dangling images?", isPresented: $isConfirmingPruneDanglingImages) {
+            Button(language.resolved == .zhHans ? "清理" : "Prune", role: .destructive) {
+                pruneDanglingImages()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(language.resolved == .zhHans ? "将删除 dangling/无标签镜像。仍被容器引用或 CLI 拒绝删除的镜像会保留或返回错误。" : "This deletes dangling or untagged images. Images referenced by containers or rejected by the CLI are kept or reported as errors.")
+        }
         .onChange(of: runtimeStore.images.map(\.reference)) { _, _ in
             pruneSelectedImages()
             pruneSelectedRegistryFilter()
@@ -413,7 +422,7 @@ struct ImagesView: View {
             }
             Divider()
             Button {
-                pruneDanglingImages()
+                isConfirmingPruneDanglingImages = true
             } label: {
                 Label(language.resolved == .zhHans ? "清理无标签镜像" : "Prune dangling images", systemImage: "sparkles")
             }
@@ -458,48 +467,51 @@ struct ImagesView: View {
     }
 
     private func imageRow(_ entry: ImageListEntry) -> some View {
-        ResourceTableRow(isSelected: isEntrySelected(entry)) {
+        ResourceTableRow(
+            isSelected: isEntrySelected(entry),
+            onActivate: {
+                selectEntry(entry)
+            },
+            activationHelp: imageRowActivationHelp(entry)
+        ) {
             let primaryImage = entry.primaryImage
             imageSelectionButton(for: entry)
             ResourceStatusDot(tint: primaryImage.variants.isEmpty ? .secondary : CDTheme.lime, isHollow: primaryImage.variants.isEmpty)
-            imageRowMainButton(entry)
+            imageRowMainContent(entry)
             imageRowActions(entry)
         }
     }
 
-    private func imageRowMainButton(_ entry: ImageListEntry) -> some View {
-        Button {
-            selectEntry(entry)
-        } label: {
-            HStack(spacing: 0) {
-                Text(entry.title)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    private func imageRowMainContent(_ entry: ImageListEntry) -> some View {
+        HStack(spacing: 0) {
+            Text(entry.title)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(entry.tagText)
-                    .font(.callout)
-                    .lineLimit(1)
-                    .frame(width: 120, alignment: .leading)
+            Text(entry.tagText)
+                .font(.callout)
+                .lineLimit(1)
+                .frame(width: 120, alignment: .leading)
 
-                Text(entry.imageIDText)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 130, alignment: .leading)
+            Text(entry.imageIDText)
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(width: 130, alignment: .leading)
 
-                Text(entry.createdText)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 130, alignment: .leading)
+            Text(entry.createdText)
+                .foregroundStyle(.secondary)
+                .frame(width: 130, alignment: .leading)
 
-                Text(entry.sizeDisplay)
-                    .frame(width: 86, alignment: .trailing)
-            }
-            .contentShape(Rectangle())
+            Text(entry.sizeDisplay)
+                .frame(width: 86, alignment: .trailing)
         }
-        .buttonStyle(.plain)
-        .help(entry.references.count > 1
+    }
+
+    private func imageRowActivationHelp(_ entry: ImageListEntry) -> String {
+        entry.references.count > 1
             ? (language.resolved == .zhHans ? "选择 tag 后打开镜像详情" : "Choose a tag to open image details")
-            : (language.resolved == .zhHans ? "打开镜像详情" : "Open image details"))
+            : (language.resolved == .zhHans ? "打开镜像详情" : "Open image details")
     }
 
     private func imageRowActions(_ entry: ImageListEntry) -> some View {

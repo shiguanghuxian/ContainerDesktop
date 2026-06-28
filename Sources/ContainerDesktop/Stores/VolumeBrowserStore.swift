@@ -12,6 +12,11 @@ final class VolumeBrowserStore {
     var isFileOperationRunning = false
     var statusMessage: String?
     var isError = false
+    var selectedFile: VolumeFileEntry?
+    var filePreviewText = ""
+    var isPreviewLoading = false
+    var previewStatusMessage: String?
+    var previewIsError = false
 
     init(service: VolumeBrowserService = VolumeBrowserService()) {
         self.service = service
@@ -32,9 +37,11 @@ final class VolumeBrowserStore {
                 sourcePath: volume.source,
                 relativePath: relativePath
             )
+            clearPreview()
             return true
         } catch {
             snapshot = nil
+            clearPreview()
             statusMessage = error.localizedDescription
             isError = true
             return false
@@ -42,7 +49,10 @@ final class VolumeBrowserStore {
     }
 
     func open(_ entry: VolumeFileEntry, volume: VolumeSummary) async {
-        guard entry.isDirectory, let snapshot else { return }
+        guard entry.isDirectory, let snapshot else {
+            await preview(entry, volume: volume)
+            return
+        }
         let relativePath = entry.url.path
             .replacingOccurrences(of: snapshot.sourceURL.path, with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -52,6 +62,7 @@ final class VolumeBrowserStore {
                 sourcePath: volume.source,
                 relativePath: relativePath
             )
+            clearPreview()
         } catch {
             statusMessage = error.localizedDescription
             isError = true
@@ -71,9 +82,43 @@ final class VolumeBrowserStore {
                 sourcePath: volume.source,
                 relativePath: path
             )
+            clearPreview()
         } catch {
             statusMessage = error.localizedDescription
             isError = true
+        }
+    }
+
+    func preview(_ entry: VolumeFileEntry, volume: VolumeSummary) async {
+        guard !entry.isDirectory else {
+            await open(entry, volume: volume)
+            return
+        }
+
+        selectedFile = entry
+        filePreviewText = ""
+        previewStatusMessage = nil
+        previewIsError = false
+
+        guard (entry.size ?? 0) <= 1_000_000 else {
+            previewStatusMessage = "文件超过 1 MB，默认不预览。"
+            return
+        }
+
+        isPreviewLoading = true
+        defer { isPreviewLoading = false }
+
+        do {
+            filePreviewText = try await service.fileContent(
+                volumeName: volume.name,
+                sourcePath: volume.source,
+                entryPath: entry.url.path
+            )
+            previewStatusMessage = nil
+            previewIsError = false
+        } catch {
+            previewStatusMessage = error.localizedDescription
+            previewIsError = true
         }
     }
 
@@ -143,6 +188,7 @@ final class VolumeBrowserStore {
                     sourcePath: volume.source,
                     relativePath: relativePath
                 )
+                clearPreview()
             } catch {
                 statusMessage = "\(output)\n创建成功，但刷新目录失败：\(error.localizedDescription)"
                 isError = true
@@ -168,6 +214,9 @@ final class VolumeBrowserStore {
                 entryPath: entry.url.path,
                 newName: newName
             )
+            if selectedFile?.id == entry.id {
+                clearPreview()
+            }
             await load(volume: volume, relativePath: relativePath)
         } catch {
             statusMessage = error.localizedDescription
@@ -189,10 +238,21 @@ final class VolumeBrowserStore {
                 sourcePath: volume.source,
                 entryPath: entry.url.path
             )
+            if selectedFile?.id == entry.id {
+                clearPreview()
+            }
             await load(volume: volume, relativePath: relativePath)
         } catch {
             statusMessage = error.localizedDescription
             isError = true
         }
+    }
+
+    private func clearPreview() {
+        selectedFile = nil
+        filePreviewText = ""
+        isPreviewLoading = false
+        previewStatusMessage = nil
+        previewIsError = false
     }
 }

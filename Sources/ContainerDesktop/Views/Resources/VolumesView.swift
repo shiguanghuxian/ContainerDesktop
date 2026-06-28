@@ -356,10 +356,16 @@ struct VolumesView: View {
                     volumeHeader
                 } rows: {
                     ForEach(filteredVolumes) { volume in
-                        ResourceTableRow(isSelected: selectedName == volume.name || detailName == volume.name) {
+                        ResourceTableRow(
+                            isSelected: selectedName == volume.name || detailName == volume.name,
+                            onActivate: {
+                                openVolumeDetail(volume)
+                            },
+                            activationHelp: language.resolved == .zhHans ? "打开卷详情" : "Open volume details"
+                        ) {
                             let deleteKey = RuntimeOperationKey.volumeDelete(volume.name)
                             let isOperationBlocked = runtimeStore.activeOperationKey != nil || runtimeStore.isVolumeOperationRunning
-                            volumeRowMainButton(volume)
+                            volumeRowMainContent(volume)
 
                             HStack(spacing: 8) {
                                 RowActionButton(
@@ -414,37 +420,30 @@ struct VolumesView: View {
         }
     }
 
-    private func volumeRowMainButton(_ volume: VolumeSummary) -> some View {
-        Button {
-            openVolumeDetail(volume)
-        } label: {
-            HStack(spacing: 12) {
-                ResourceStatusDot(tint: volume.isAnonymous ? .orange : CDTheme.lime, isHollow: volume.isAnonymous)
+    private func volumeRowMainContent(_ volume: VolumeSummary) -> some View {
+        HStack(spacing: 12) {
+            ResourceStatusDot(tint: volume.isAnonymous ? .orange : CDTheme.lime, isHollow: volume.isAnonymous)
 
-                Text(volume.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Text(volume.name)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                StatusPill(title: volume.typeText, systemImage: "tag", tint: volume.isAnonymous ? .orange : CDTheme.lime)
-                    .frame(width: 112, alignment: .leading)
+            StatusPill(title: volume.typeText, systemImage: "tag", tint: volume.isAnonymous ? .orange : CDTheme.lime)
+                .frame(width: 112, alignment: .leading)
 
-                Text(volume.driver)
-                    .lineLimit(1)
-                    .frame(width: 92, alignment: .leading)
+            Text(volume.driver)
+                .lineLimit(1)
+                .frame(width: 92, alignment: .leading)
 
-                Text(volume.createdText)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 140, alignment: .leading)
+            Text(volume.createdText)
+                .foregroundStyle(.secondary)
+                .frame(width: 140, alignment: .leading)
 
-                Text(volume.sizeDisplay)
-                    .font(.callout.monospacedDigit())
-                    .frame(width: 90, alignment: .trailing)
-            }
-            .contentShape(Rectangle())
+            Text(volume.sizeDisplay)
+                .font(.callout.monospacedDigit())
+                .frame(width: 90, alignment: .trailing)
         }
-        .buttonStyle(.plain)
-        .help(language.resolved == .zhHans ? "打开卷详情" : "Open volume details")
     }
 
     private var deleteAlertMessage: String {

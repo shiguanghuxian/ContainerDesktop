@@ -1,10 +1,38 @@
 import SwiftUI
 
-struct PanelView<Content: View>: View {
+struct PanelView<Content: View, HeaderAccessory: View>: View {
     var title: String
     var subtitle: String?
     var systemImage: String?
+    @ViewBuilder var headerAccessory: HeaderAccessory
     @ViewBuilder var content: Content
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) where HeaderAccessory == EmptyView {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.headerAccessory = EmptyView()
+        self.content = content()
+    }
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String? = nil,
+        @ViewBuilder headerAccessory: () -> HeaderAccessory,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.headerAccessory = headerAccessory()
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -23,6 +51,7 @@ struct PanelView<Content: View>: View {
                     }
                 }
                 Spacer()
+                headerAccessory
             }
             content
         }

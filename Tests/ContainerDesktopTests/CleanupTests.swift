@@ -18,6 +18,22 @@ struct CleanupTests {
         #expect(!log.contains("--all"))
     }
 
+    @Test("cleanup plan estimates selected categories and command preview")
+    func cleanupPlanEstimatesSelectedCategoriesAndCommandPreview() {
+        let usage = DiskUsageSummary(
+            containers: .init(active: 1, reclaimable: 500, sizeInBytes: 700, total: 3),
+            images: .init(active: 2, reclaimable: 300, sizeInBytes: 1_300, total: 4),
+            volumes: .init(active: 1, reclaimable: 900, sizeInBytes: 1_200, total: 2)
+        )
+        let plan = SystemCleanupPlan(categories: [.stoppedContainers, .unusedVolumes])
+
+        #expect(SystemCleanupPlan.safeDefault.categories == [.stoppedContainers, .danglingImages])
+        #expect(plan.estimatedReclaimableBytes(in: usage) == 1_400)
+        #expect(plan.commandPreview == "container prune\ncontainer volume prune")
+        #expect(plan.includesVolumes)
+        #expect(SystemCleanupCategory.danglingImages.reclaimableBytes(in: usage) == 300)
+    }
+
     @MainActor
     @Test("cleanup refreshes resources after success")
     func cleanupRefreshesResourcesAfterSuccess() async throws {
@@ -39,6 +55,37 @@ struct CleanupTests {
         #expect(log.contains("list --all --format json\n"))
         #expect(log.contains("image list --format json\n"))
         #expect(log.contains("system df --format json\n"))
+    }
+
+    @MainActor
+    @Test("cleanup selected volume category only prunes volumes")
+    func cleanupSelectedVolumeCategoryOnlyPrunesVolumes() async throws {
+        let fake = try FakeContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        await store.cleanupCache(plan: SystemCleanupPlan(categories: [.unusedVolumes]))
+
+        #expect(!store.isCleanupRunning)
+        #expect(!store.cleanupStatusIsError)
+        #expect(store.cleanupStatusMessage?.contains("清理完成") == true)
+
+        let log = try fake.commandLog()
+        #expect(log.contains("volume prune\n"))
+        #expect(!log.contains("prune\nimage prune\n"))
+        #expect(log.contains("volume list --format json\n"))
+    }
+
+    @MainActor
+    @Test("cleanup selected categories require at least one category")
+    func cleanupSelectedCategoriesRequireAtLeastOneCategory() async throws {
+        let fake = try FakeContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        await store.cleanupCache(plan: SystemCleanupPlan(categories: []))
+
+        #expect(store.cleanupStatusIsError)
+        #expect(store.cleanupStatusMessage == "请选择至少一个要清理的分类。")
+        #expect((try? fake.commandLog()) == nil)
     }
 
     @MainActor
@@ -94,14 +141,29 @@ private struct FakeContainerCLI {
             touch "$state_dir/pruned-images"
             echo "dangling images pruned"
             ;;
+          "volume prune")
+            touch "$state_dir/pruned-volumes"
+            echo "unused volumes pruned"
+            ;;
           "list --all --format json")
             echo "[]"
             ;;
           "image list --format json")
             echo "[]"
             ;;
+          "volume list --format json")
+            echo "[]"
+            ;;
           "system df --format json")
-            if [ -f "$state_dir/pruned-images" ]; then
+            if [ -f "$state_dir/pruned-volumes" ]; then
+              cat <<'JSON'
+        {
+          "containers": { "active": 0, "reclaimable": 500, "sizeInBytes": 500, "total": 1 },
+          "images": { "active": 1, "reclaimable": 300, "sizeInBytes": 1300, "total": 2 },
+          "volumes": { "active": 0, "reclaimable": 0, "sizeInBytes": 0, "total": 0 }
+        }
+        JSON
+            elif [ -f "$state_dir/pruned-images" ]; then
               cat <<'JSON'
         {
           "containers": { "active": 0, "reclaimable": 0, "sizeInBytes": 0, "total": 0 },

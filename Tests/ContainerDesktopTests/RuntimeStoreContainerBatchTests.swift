@@ -49,6 +49,48 @@ struct RuntimeStoreContainerBatchTests {
     }
 
     @MainActor
+    @Test("deletes selected containers and refreshes resources once")
+    func deletesSelectedContainersAndRefreshesOnce() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        let result = await store.deleteContainers(["web-1", "", "api-1"])
+
+        #expect(result.succeeded)
+        #expect(result.output.contains("删除容器完成"))
+        #expect(result.output.contains("web-1"))
+        #expect(result.output.contains("api-1"))
+        #expect(store.operationFeedback?.phase == .succeeded)
+        #expect(store.operationFeedback?.message == "已删除容器 2 个")
+        #expect(store.busyMessage == nil)
+
+        let log = try fake.commandLog()
+        #expect(log.contains("delete web-1\n"))
+        #expect(log.contains("delete api-1\n"))
+        #expect(log.split(separator: "\n").filter { $0 == "list --all --format json" }.count == 1)
+    }
+
+    @MainActor
+    @Test("delete containers batch reports failures")
+    func deleteContainersBatchReportsFailures() async throws {
+        let fake = try FakeBatchContainerCLI()
+        let store = RuntimeStore(client: ContainerCLIClient(runner: CommandRunner(searchRoots: [fake.directory])))
+
+        let result = await store.deleteContainers(["web-1", "missing-container"])
+
+        #expect(!result.succeeded)
+        #expect(result.output.contains("删除容器失败"))
+        #expect(result.output.contains("missing-container"))
+        #expect(store.operationFeedback?.phase == .failed)
+        #expect(store.operationFeedback?.message == "删除容器失败")
+
+        let log = try fake.commandLog()
+        #expect(log.contains("delete web-1\n"))
+        #expect(log.contains("delete missing-container\n"))
+        #expect(log.split(separator: "\n").filter { $0 == "list --all --format json" }.count == 1)
+    }
+
+    @MainActor
     @Test("empty image batch delete does not call CLI")
     func emptyImageBatchDeleteDoesNotCallCLI() async throws {
         let fake = try FakeBatchContainerCLI()
@@ -581,6 +623,13 @@ private struct FakeBatchContainerCLI {
           "image delete missing:latest")
             echo "image is used by a container" >&2
             exit 74
+            ;;
+          "delete web-1"|"delete api-1")
+            echo "deleted container"
+            ;;
+          "delete missing-container")
+            echo "container not found: missing-container" >&2
+            exit 75
             ;;
           "network create --internal --label app=web --label tier=edge --option mtu=1500 --plugin container-network-vmnet --subnet 192.168.100.0/24 --subnet-v6 fd00:100::/64 app-net")
             echo "network created"
